@@ -40,8 +40,8 @@ from kitty.constants import str_version  # noqa
 # -- Project information -----------------------------------------------------
 
 project = 'kitty'
-copyright = time.strftime('%Y, Kovid Goyal')
-author = 'Kovid Goyal'
+copyright = time.strftime('%Y, Kovid Goyal, KittyPatch')
+author = 'Kovid Goyal, KittyPatch'
 building_man_pages = 'man' in sys.argv
 
 # The short X.Y version
@@ -99,7 +99,7 @@ pygments_style = 'sphinx'
 rst_prolog = '''
 .. |kitty| replace:: *kitty*
 .. |version| replace:: VERSION
-.. _tarball: https://github.com/kovidgoyal/kitty/releases/download/vVERSION/kitty-VERSION.tar.xz
+.. _tarball: https://github.com/KittyPatch/kitty/releases/download/vVERSION/kitty-VERSION.tar.xz
 .. role:: green
 .. role:: italic
 .. role:: bold
@@ -128,7 +128,7 @@ html_theme_options = {
     'sidebar_collapse': True,
     'github_button': False,
     'github_banner': True,
-    'github_user': 'kovidgoyal',
+    'github_user': 'KittyPatch',
     'github_repo': 'kitty',
     # increase contrast of link color with text color
     'link': '#00587d',
@@ -218,7 +218,7 @@ def commit_role(name: str, rawtext: str, text: str, lineno: int, inliner: Any, o
             f'GitHub commit id "{text}" not recognized.', line=lineno)
         prb = inliner.problematic(rawtext, rawtext, msg)
         return [prb], [msg]
-    url = f'https://github.com/kovidgoyal/kitty/commit/{commit_id}'
+    url = f'https://github.com/KittyPatch/kitty/commit/{commit_id}'
     set_classes(options)
     short_id = subprocess.check_output(
         f'git rev-list --max-count=1 --abbrev-commit --skip=# {commit_id}'.split()).decode('utf-8').strip()

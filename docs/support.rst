@@ -1,5 +1,18 @@
-Support kitty development
-===========================
+A message from us at KittyPatch
+===============================
+
+KittyPatch was created as a home for useful features that are unavailable
+in the kitty main branch.  To this end, we do not accept donations directly.
+
+If you wish to support KittyPatch: share your ideas and spread the word.
+
+If you still wish to donate, please `support the Free Software Foundation
+<https://my.fsf.org/donate>`.
+
+
+
+A message from the maintainer of Kitty
+======================================
 
 My goal with |kitty| is to move the stagnant terminal ecosystem forward.  To that
 end kitty has many foundational features, such as: :doc:`image support

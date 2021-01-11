@@ -19,7 +19,7 @@ class Version(NamedTuple):
     patch: int
 
 
-appname: str = 'kitty'
+appname: str = 'kittypatch'
 version: Version = Version(0, 19, 3)
 str_version: str = '.'.join(map(str, version))
 _plat = sys.platform.lower()
