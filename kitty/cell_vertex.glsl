@@ -104,7 +104,7 @@ uint brighten_color(uint c, uint is_bold) {
 	uint is_table_color = c & 1u;
 	uint is_rgb_color = byte_to_bool(c & 0xFEu);
 	uint is_8bit_color = byte_to_bool(table_idx & 0xF8u);
-	uint should_brighten = bold_is_bright * is_bold * (1u - is_rgb_color * is_8bit_color) * is_table_color;
+	uint should_brighten = bold_is_bright * is_bold * (1u >> (is_rgb_color + is_8bit_color)) * is_table_color;
 	return c | (0x800u * should_brighten);
 }
 
