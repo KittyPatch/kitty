@@ -22,7 +22,7 @@ import requests
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 docs_dir = os.path.abspath('docs')
-publish_dir = os.path.abspath(os.path.join('..', 'kovidgoyal.github.io', 'kitty'))
+publish_dir = os.path.abspath(os.path.join('..', 'kittypath.github.io', 'kitty'))
 with open('kitty/constants.py') as f:
     raw = f.read()
 nv = re.search(r'^version: Version\s+=\s+Version\((\d+), (\d+), (\d+)\)', raw, flags=re.MULTILINE)
@@ -68,15 +68,16 @@ def run_html(args: Any) -> None:
 
 def add_analytics() -> None:
     analytics = '''
-<!-- Global site tag (gtag.js) - Google Analytics -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=UA-20736318-2"></script>
+<!-- Global site tag (gtag.js) - Google Analytics
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-XXXXXXXX-X"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
 
-  gtag('config', 'UA-20736318-2');
+  gtag('config', 'UA-XXXXXXXX-X');
 </script>
+-->
 '''
     for dirpath, firnames, filenames in os.walk(publish_dir):
         for fname in filenames:

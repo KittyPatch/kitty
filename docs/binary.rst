@@ -25,7 +25,7 @@ Manually installing
 
 If something goes wrong or you simply do not want to run the installer, you can
 manually download and install |kitty| from the `GitHub releases page
-<https://github.com/kovidgoyal/kitty/releases>`_. If you are on macOS, download
+<https://github.com/KittyPatch/kitty/releases>`_. If you are on macOS, download
 the :file:`.dmg` and install as normal. If you are on Linux, download the tarball
 and extract it into a directory. The |kitty| executable will be in the
 :file:`bin` sub-directory.

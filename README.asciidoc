@@ -1,5 +1,0 @@
-= kitty - the fast, featureful, GPU based, terminal emulator
-
-See https://sw.kovidgoyal.net/kitty/
-
-image:https://github.com/kovidgoyal/kitty/workflows/CI/badge.svg["Build status", link="https://github.com/kovidgoyal/kitty/actions?query=workflow%3ACI"]
