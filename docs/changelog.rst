@@ -1,11 +1,38 @@
 Changelog
 ==============
 
-|kitty| is a feature full, cross-platform, *fast*, GPU based terminal emulator.
+|kitty| is a feature-rich, cross-platform, *fast*, GPU based terminal.
 To update |kitty|, :doc:`follow the instructions <binary>`.
 
 0.20.0 [future]
 ----------------------
+
+- Support display of animated images ``kitty +kitten icat animation.gif``. See
+  :ref:`animation_protocol` for details on animation support in the kitty
+  graphics protocol.
+
+- A new keyboard reporting protocol with various advanced features that can be
+  used by full screen terminal programs and even games, see
+  :doc:`keyboard-protocol` (:iss:`3248`)
+
+- **Backward incompatibility**: Session files now use the full :doc:`launch <launch>`
+  command with all its capabilities. However, the syntax of the command is
+  slightly different from before. In particular watchers are now specified
+  directly on launch and environment variables are set using ``--env``.
+
+- Allow setting colors when creating windows using the :doc:`launch <launch>` command.
+
+- A new option :opt:`tab_powerline_style` to control the appearance of the tab
+  bar when using the powerline tab bar style.
+
+- A new option :opt:`scrollback_fill_enlarged_window` to fill extra lines in
+  the window when the window is expanded with lines from the scrollback
+  (:pull:`3371`)
+
+- diff kitten: Implement recursive diff over SSH (:iss:`3268`)
+
+- ssh kitten: Allow using python instead of the shell on the server, useful if
+  the shell used is a non-POSIX compliant one, such as fish (:iss:`3277`)
 
 - Add support for the color settings stack that XTerm copied from us without
   acknowledgement and decided to use incompatible escape codes for.
@@ -19,11 +46,61 @@ To update |kitty|, :doc:`follow the instructions <binary>`.
 
 - Double clicking on empty tab bar area now opens a new tab (:iss:`3201`)
 
+- When passing a directory or a non-executable file as the program to run to
+  kitty open it with the shell, instead of just failing.
+
 - Linux: Fix rendering of emoji followed by the graphics variation selector not
   being colored with some fonts (:iss:`3211`)
 
 - Unicode input: Fix using index in select by name mode not working for indices
   larger than 16. Also using an index does not filter the list of matches. (:pull:`3219`)
+
+- Panel kitten: Allow setting WM_CLASS (:iss:`3233`)
+
+- macOS: Add menu items to close the OS window and the current tab (:pull:`3240`, :iss:`3246`)
+
+- macOS: Allow opening script and command files with kitty (:iss:`3366`)
+
+- Also detect ``gemini://`` URLs when hovering with the mouse (:iss:`3370`)
+
+- When using a non-US keyboard layout and pressing :kbd:`ctrl+key` when
+  the key matches an English key, send that to the program running in the
+  terminal automatically (:iss:`2000`)
+
+- When matching shortcuts, also match on shifted keys, so a shortcut defined as
+  :kbd:`ctrl+plus` will match a keyboard where you have to press
+  :kbd:`shift+equal` to get the plus key (:iss:`2000`)
+
+- Fix extra space at bottom of OS window when using the fat layout with the tab bar at the
+  top (:iss:`3258`)
+
+- Fix window icon not working on X11 with 64bits (:iss:`3260`)
+
+- Fix OS window sizes under 100px resulting in scaled display (:iss:`3307`)
+
+- Fix rendering of ligatures in the latest release of Cascadia code, which for
+  some reason puts empty glyphs after the ligature glyph rather than before it
+  (:iss:`3313`)
+
+- Improve handling of infinite length ligatures in newer versions of FiraCode
+  and CascadiaCode. Now such ligatures are detected based on glyph naming
+  convention. This removes the gap in the ligatures at cell boundaries (:iss:`2695`)
+
+- macOS: Disable the native operating system tabs as they are non-functional
+  and can be confusing (:iss:`3325`)
+
+- hints kitten: When using the linenumber action with a background action,
+  preserve the working directory (:iss:`3352`)
+
+- Graphics protocol: Fix suppression of responses not working for chunked
+  transmission (:iss:`3375`)
+
+- Fix inactive tab closing causing active tab to change (:iss:`3398`)
+
+- Fix a crash on systems using musl as libc (:iss:`3395`)
+
+- Improve rendering of rounded corners by using a rectircle equation rather
+  than a cubic bezier (:iss:`3409`)
 
 
 0.19.3 [2020-12-19]

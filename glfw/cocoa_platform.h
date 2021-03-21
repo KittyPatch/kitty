@@ -67,6 +67,7 @@ typedef void* CVDisplayLinkRef;
 
 typedef int (* GLFWcocoatextinputfilterfun)(int,int,unsigned int, unsigned long);
 typedef bool (* GLFWapplicationshouldhandlereopenfun)(int);
+typedef bool (* GLFWhandlefileopen)(const char*);
 typedef void (* GLFWapplicationwillfinishlaunchingfun)(void);
 typedef bool (* GLFWcocoatogglefullscreenfun)(GLFWwindow*);
 typedef void (* GLFWcocoarenderframefun)(GLFWwindow*);
@@ -178,8 +179,6 @@ typedef struct _GLFWlibraryNS
 
     char                keyName[64];
     char                text[256];
-    short int           keycodes[256];
-    short int           key_to_keycode[GLFW_KEY_LAST + 1];
     char*               clipboardString;
     CGPoint             cascadePoint;
     // Where to place the cursor when re-enabled
@@ -199,6 +198,8 @@ typedef struct _GLFWlibraryNS
         _GLFWDisplayLinkNS entries[256];
         size_t count;
     } displayLinks;
+    // the callback to handle file open events
+    GLFWhandlefileopen file_open_callback;
 
 } _GLFWlibraryNS;
 

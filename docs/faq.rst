@@ -54,7 +54,12 @@ type it each time::
     alias ssh="kitty +kitten ssh"
 
 If for some reason that does not work (typically because the server is using a
-non POSIX compliant shell), you can use the following one-liner instead (it
+non POSIX compliant shell), you can try using it with python instead::
+
+    kitty +kitten ssh use-python myserver
+
+If that also fails, perhaps because python is not installed on the remote
+server, use the following one-liner instead (it
 is slower as it needs to ssh into the server twice, but will work with most
 servers)::
 
@@ -253,6 +258,33 @@ In :file:`kitty.conf` add the following::
 Pressing :kbd:`F1` will open a new kitty window with the same working directory
 as the current window. The :doc:`launch command <launch>` is very powerful,
 explore :doc:`its documentation <launch>`.
+
+
+Things behave differently when running kitty from system launcher vs. from another terminal?
+-----------------------------------------------------------------------------------------------
+
+This will be because of environment variables. When you run kitty from the
+system launcher, it gets a default set of system environment variables. When
+you run kitty from another terminal, you are actually running it from a shell,
+and the shell's rc files will have setup a whole different set of environment
+variables which kitty will now inherit.
+
+You need to make sure that the environment variables you define in your shell's
+rc files are either also defined system wide or via the :opt:`env` directive in
+:file:`kitty.conf`. Common environment variables that cause issues are those
+related to localization, such as ``LANG, LC_*`` and loading of configuration
+files such as ``XDG_*, KITTY_CONFIG_DIRECTORY``.
+
+To see the environment variables that kitty sees, you can add the following
+mapping to :file:`kitty.conf`::
+
+    map f1 show_kitty_env_vars
+
+then pressing :kbd:`F1` will show you the environment variables kitty sees.
+
+This problem is most common on macOS, as Apple makes it exceedingly difficult to
+setup environment variables system-wide, so people end up putting them in all
+sorts of places where they may or may not work.
 
 
 I am using tmux and have a problem

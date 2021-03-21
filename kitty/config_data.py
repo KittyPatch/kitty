@@ -4,7 +4,6 @@
 
 # Utils  {{{
 import os
-from contextlib import suppress
 from gettext import gettext as _
 from typing import (
     Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Sequence, Set,
@@ -14,17 +13,18 @@ from typing import (
 from . import fast_data_types as defines
 from .conf.definition import Option, Shortcut, option_func
 from .conf.utils import (
-    choices, positive_float, positive_int, to_bool, to_cmdline as tc, to_color,
-    to_color_or_none, unit_float
+    choices, to_bool, to_cmdline as tc, to_color, to_color_or_none, unit_float
 )
-from .constants import (
-    FloatEdges, SingleKey, config_dir, is_macos
-)
+from .constants import config_dir, is_macos
 from .fast_data_types import CURSOR_BEAM, CURSOR_BLOCK, CURSOR_UNDERLINE
-from .key_names import get_key_name_lookup, key_name_aliases
+from .key_names import (
+    character_key_name_aliases, functional_key_name_aliases,
+    get_key_name_lookup
+)
 from .layout.interface import all_layouts
 from .rgb import Color, color_as_int, color_as_sharp, color_from_int
-from .utils import log_error
+from .types import FloatEdges, SingleKey
+from .utils import log_error, positive_float, positive_int
 
 
 class InvalidMods(ValueError):
@@ -34,6 +34,9 @@ class InvalidMods(ValueError):
 MINIMUM_FONT_SIZE = 4
 mod_map = {'CTRL': 'CONTROL', 'CMD': 'SUPER', '⌘': 'SUPER',
            '⌥': 'ALT', 'OPTION': 'ALT', 'KITTY_MOD': 'KITTY'}
+character_key_name_aliases_with_ascii_lowercase = character_key_name_aliases.copy()
+for x in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+    character_key_name_aliases_with_ascii_lowercase[x] = x.lower()
 
 
 def to_cmdline(x: str) -> List[str]:
@@ -61,24 +64,39 @@ def to_modifiers(val: str) -> int:
 
 
 def parse_shortcut(sc: str) -> SingleKey:
+    if sc.endswith('+') and len(sc) > 1:
+        sc = sc[:-1] + 'plus'
     parts = sc.split('+')
     mods = 0
     if len(parts) > 1:
         mods = parse_mods(parts[:-1], sc) or 0
         if not mods:
             raise InvalidMods('Invalid shortcut')
-    q = parts[-1].upper()
-    key: Optional[int] = getattr(defines, 'GLFW_KEY_' + key_name_aliases.get(q, q), None)
+    q = parts[-1]
+    q = character_key_name_aliases_with_ascii_lowercase.get(q.upper(), q)
     is_native = False
-    if key is None:
-        q = parts[-1]
-        if q.startswith('0x'):
-            with suppress(Exception):
-                key = int(q, 16)
+    if q.startswith('0x'):
+        try:
+            key = int(q, 16)
+        except Exception:
+            key = 0
         else:
-            key = get_key_name_lookup()(q, False)
-        is_native = key is not None
-    return SingleKey(mods, is_native, key or defines.GLFW_KEY_UNKNOWN)
+            is_native = True
+    else:
+        try:
+            key = ord(q)
+        except Exception:
+            uq = q.upper()
+            uq = functional_key_name_aliases.get(uq, uq)
+            x: Optional[int] = getattr(defines, f'GLFW_FKEY_{uq}', None)
+            if x is None:
+                lf = get_key_name_lookup()
+                key = lf(q, False) or 0
+                is_native = key > 0
+            else:
+                key = x
+
+    return SingleKey(mods, is_native, key or 0)
 
 
 T = TypeVar('T')
@@ -123,9 +141,9 @@ as color16 to color255.''')
     'shortcuts': [
         _('Keyboard shortcuts'),
         _('''\
-For a list of key names, see: :link:`the GLFW key macros
-<https://github.com/kovidgoyal/kitty/blob/master/glfw/glfw3.h#L349>`.
-The name to use is the part after the :code:`GLFW_KEY_` prefix.
+Keys are identified simply by their lowercase unicode characters. For example:
+``a`` for the A key, ``[`` for the left square bracket key, etc. For functional
+keys, such as ``Enter or Escape`` the names are present at :ref:`functional`.
 For a list of modifier names, see:
 :link:`GLFW mods <https://www.glfw.org/docs/latest/group__mods.html>`
 
@@ -496,6 +514,10 @@ The current implementation stores the data in UTF-8, so approximatively
 10000 lines per megabyte at 100 chars per line, for pure ASCII text, unformatted text.
 A value of zero or less disables this feature. The maximum allowed size is 4GB.'''))
 
+o('scrollback_fill_enlarged_window', False, long_text=_('''
+Fill new space with lines from the scrollback buffer after enlarging a window.
+'''))
+
 o('wheel_scroll_multiplier', 5.0, long_text=_('''
 Modify the amount scrolled by the mouse wheel. Note this is only used for low
 precision scrolling devices, not for high precision scrolling on platforms such
@@ -548,7 +570,7 @@ def url_prefixes(x: str) -> Tuple[str, ...]:
     return tuple(a.lower() for a in x.replace(',', ' ').split())
 
 
-o('url_prefixes', 'http https file ftp', option_type=url_prefixes, long_text=_('''
+o('url_prefixes', 'http https file ftp gemini irc gopher mailto news git', option_type=url_prefixes, long_text=_('''
 The set of URL prefixes to look for when detecting a URL under the mouse cursor.'''))
 
 o('detect_urls', True, long_text=_('''
@@ -934,6 +956,11 @@ entries to this list.
 
 o('tab_separator', '"{}"'.format(default_tab_separator), option_type=tab_separator, long_text=_('''
 The separator between tabs in the tab bar when using :code:`separator` as the :opt:`tab_bar_style`.'''))
+
+o('tab_powerline_style', 'angled', option_type=choices('angled', 'slanted', 'round'), long_text=_('''
+The powerline separator style between tabs in the tab bar when using :code:`powerline`
+as the :opt:`tab_bar_style`, can be one of: :code:`angled`, :code:`slanted`, or :code:`round`.
+'''))
 
 
 def tab_activity_symbol(x: str) -> Optional[str]:
@@ -1470,12 +1497,12 @@ if is_macos:
 g('shortcuts.tab')  # {{{
 k('next_tab', 'kitty_mod+right', 'next_tab', _('Next tab'))
 if is_macos:
-    k('next_tab', 'ctrl+tab', 'next_tab', _('Next tab'), add_to_docs=False)
     k('next_tab', 'shift+cmd+]', 'next_tab', _('Next tab'), add_to_docs=False)
+    k('next_tab', 'ctrl+tab', 'next_tab', _('Next tab'), add_to_docs=False)
 k('previous_tab', 'kitty_mod+left', 'previous_tab', _('Previous tab'))
 if is_macos:
-    k('previous_tab', 'shift+ctrl+tab', 'previous_tab', _('Previous tab'), add_to_docs=False)
     k('previous_tab', 'shift+cmd+[', 'previous_tab', _('Previous tab'), add_to_docs=False)
+    k('previous_tab', 'shift+ctrl+tab', 'previous_tab', _('Previous tab'), add_to_docs=False)
 k('new_tab', 'kitty_mod+t', 'new_tab', _('New tab'))
 if is_macos:
     k('new_tab', 'cmd+t', 'new_tab', _('New tab'), add_to_docs=False)
@@ -1496,11 +1523,14 @@ k('next_layout', 'kitty_mod+l', 'next_layout', _('Next layout'))
 
 g('shortcuts.fonts')  # {{{
 k('increase_font_size', 'kitty_mod+equal', 'change_font_size all +2.0', _('Increase font size'))
+k('increase_font_size', 'kitty_mod+plus', 'change_font_size all +2.0', _('Increase font size'), add_to_docs=False)
+k('increase_font_size', 'kitty_mod+kp_add', 'change_font_size all +2.0', _('Increase font size'), add_to_docs=False)
 if is_macos:
     k('increase_font_size', 'cmd+plus', 'change_font_size all +2.0', _('Increase font size'), add_to_docs=False)
     k('increase_font_size', 'cmd+equal', 'change_font_size all +2.0', _('Increase font size'), add_to_docs=False)
     k('increase_font_size', 'cmd+shift+equal', 'change_font_size all +2.0', _('Increase font size'), add_to_docs=False)
 k('decrease_font_size', 'kitty_mod+minus', 'change_font_size all -2.0', _('Decrease font size'))
+k('decrease_font_size', 'kitty_mod+kp_subtract', 'change_font_size all -2.0', _('Decrease font size'))
 if is_macos:
     k('decrease_font_size', 'cmd+minus', 'change_font_size all -2.0', _('Decrease font size'), add_to_docs=False)
     k('decrease_font_size', 'cmd+shift+minus', 'change_font_size all -2.0', _('Decrease font size'), add_to_docs=False)
@@ -1546,7 +1576,11 @@ g('shortcuts.misc')  # {{{
 k('toggle_fullscreen', 'kitty_mod+f11', 'toggle_fullscreen', _('Toggle fullscreen'))
 k('toggle_maximized', 'kitty_mod+f10', 'toggle_maximized', _('Toggle maximized'))
 k('input_unicode_character', 'kitty_mod+u', 'kitten unicode_input', _('Unicode input'))
+if is_macos:
+    k('input_unicode_character', 'cmd+ctrl+space', 'kitten unicode_input', _('Unicode input'), add_to_docs=False)
 k('edit_config_file', 'kitty_mod+f2', 'edit_config_file', _('Edit config file'))
+if is_macos:
+    k('edit_config_file', 'cmd+,', 'edit_config_file', _('Edit config file'), add_to_docs=False)
 k('kitty_shell', 'kitty_mod+escape', 'kitty_shell window', _('Open the kitty command shell'), long_text=_('''
 Open the kitty shell in a new window/tab/overlay/os_window to control kitty using commands.'''))
 k('increase_background_opacity', 'kitty_mod+a>m', 'set_background_opacity +0.1', _('Increase background opacity'))

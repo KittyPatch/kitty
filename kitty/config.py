@@ -20,9 +20,10 @@ from .conf.utils import (
     parse_config_base, python_string, to_bool, to_cmdline
 )
 from .config_data import InvalidMods, all_options, parse_shortcut, type_convert
-from .constants import SingleKey, cache_dir, defconf, is_macos
+from .constants import cache_dir, defconf, is_macos
 from .fonts import FontFeature
 from .options_stub import Options as OptionsStub
+from .types import SingleKey
 from .typing import TypedDict
 from .utils import expandvars, log_error
 
@@ -34,7 +35,7 @@ SequenceMap = Dict[SingleKey, SubSequenceMap]
 
 class KeyAction(NamedTuple):
     func: str
-    args: Sequence[str]
+    args: Sequence[str] = ()
 
 
 func_with_args, args_funcs = key_func()
@@ -297,11 +298,12 @@ def parse_marker_spec(ftype: str, parts: Sequence[str]) -> Tuple[str, Union[str,
 
 @func_with_args('toggle_marker')
 def toggle_marker(func: str, rest: str) -> FuncArgsType:
+    import shlex
     parts = rest.split(maxsplit=1)
     if len(parts) != 2:
         raise ValueError('{} is not a valid marker specification'.format(rest))
     ftype, spec = parts
-    parts = spec.split()
+    parts = shlex.split(spec)
     return func, list(parse_marker_spec(ftype, parts))
 
 
@@ -394,7 +396,7 @@ def parse_key(val: str, key_definitions: List[KeyDefinition]) -> None:
                 mods, is_native, key = parse_shortcut(part)
             except InvalidMods:
                 return
-            if key is defines.GLFW_KEY_UNKNOWN:
+            if key == 0:
                 if mods is not None:
                     log_error('Shortcut: {} has unknown key, ignoring'.format(sc))
                 return
@@ -408,7 +410,7 @@ def parse_key(val: str, key_definitions: List[KeyDefinition]) -> None:
             mods, is_native, key = parse_shortcut(sc)
         except InvalidMods:
             return
-        if key is defines.GLFW_KEY_UNKNOWN:
+        if key == 0:
             if mods is not None:
                 log_error('Shortcut: {} has unknown key, ignoring'.format(sc))
             return

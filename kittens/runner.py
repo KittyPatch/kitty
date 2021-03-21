@@ -6,8 +6,10 @@
 import importlib
 import os
 import sys
-from functools import lru_cache, partial
+from functools import partial
 from typing import Any, Dict, FrozenSet, List
+
+from kitty.types import run_once
 
 aliases = {'url_hints': 'hints'}
 
@@ -57,8 +59,9 @@ def create_kitten_handler(kitten: str, orig_args: List[str]) -> Any:
 
 
 def set_debug(kitten: str) -> None:
-    from kittens.tui.loop import debug
     import builtins
+
+    from kittens.tui.loop import debug
     setattr(builtins, 'debug', debug)
 
 
@@ -114,20 +117,21 @@ def run_kitten(kitten: str, run_name: str = '__main__') -> None:
         for kitten in all_kitten_names():
             print(kitten, file=sys.stderr)
         raise SystemExit('No kitten named {}'.format(original_kitten_name))
-    m = runpy.run_path(path, init_globals={'sys': sys, 'os': os}, run_name='__run_kitten__')
+    m = runpy.run_path(path, init_globals={'sys': sys, 'os': os}, run_name='__run_kitten__')  # type: ignore
     m['main'](sys.argv)
 
 
-@lru_cache(maxsize=2)
+@run_once
 def all_kitten_names() -> FrozenSet[str]:
-    n = []
-    import glob
-    base = os.path.dirname(os.path.abspath(__file__))
-    for x in glob.glob(os.path.join(base, '*', '__init__.py')):
-        q = os.path.basename(os.path.dirname(x))
-        if q != 'tui':
-            n.append(q)
-    return frozenset(n)
+    try:
+        from importlib.resources import contents
+    except ImportError:
+        from importlib_resources import contents  # type: ignore
+    ans = []
+    for name in contents('kittens'):
+        if '__' not in name and '.' not in name and name != 'tui':
+            ans.append(name)
+    return frozenset(ans)
 
 
 def list_kittens() -> None:

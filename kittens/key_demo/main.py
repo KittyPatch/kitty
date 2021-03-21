@@ -21,10 +21,7 @@ class KeysHandler(Handler):
         self.cmd.set_cursor_visible(False)
         self.print('Press any keys - Ctrl+C or Ctrl+D will terminate')
 
-    def on_text(self, text: str, in_bracketed_paste: bool = False) -> None:
-        self.print('Text input: ' + text)
-
-    def on_key(self, key_event: KeyEvent) -> None:
+    def on_key_event(self, key_event: KeyEvent, in_bracketed_paste: bool = False) -> None:
         etype = {
             PRESS: 'PRESS',
             REPEAT: 'REPEAT',
@@ -41,7 +38,24 @@ class KeysHandler(Handler):
         mods = '+'.join(lmods)
         if mods:
             mods += '+'
-        self.print('Key {}: {}{} [{}]'.format(etype, mods, key_event.key, encode_key_event(key_event)))
+        key = f'{mods}{key_event.key} '
+        self.cmd.colored(key, 'green')
+        self.cmd.colored(etype + ' ', 'yellow')
+        self.cmd.styled(key_event.text, italic=True)
+        self.print()
+        rep = 'CSI ' + encode_key_event(key_event)[2:]
+        rep = rep.replace(';', ' ; ').replace(':', ' : ')[:-1] + ' ' + rep[-1]
+        self.cmd.styled(rep, fg='magenta')
+        if (key_event.shifted_key or key_event.alternate_key):
+            self.print()
+            if key_event.shifted_key:
+                self.cmd.colored('Shifted key: ', 'gray')
+                self.print(key_event.shifted_key + ' ', end='')
+            if key_event.alternate_key:
+                self.cmd.colored('Alternate key: ', 'gray')
+                self.print(key_event.alternate_key + ' ', end='')
+        self.print()
+        self.print()
 
     def on_interrupt(self) -> None:
         self.quit_loop(0)

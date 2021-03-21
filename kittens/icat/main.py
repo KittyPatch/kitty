@@ -5,30 +5,31 @@
 import contextlib
 import os
 import re
-import socket
 import signal
+import socket
 import sys
 import zlib
 from base64 import standard_b64encode
-from functools import lru_cache
 from math import ceil
 from tempfile import NamedTemporaryFile
 from typing import (
     Dict, Generator, List, NamedTuple, Optional, Pattern, Tuple, Union
 )
 
-from kitty.guess_mime_type import guess_type
 from kitty.cli import parse_args
 from kitty.cli_stub import IcatCLIOptions
 from kitty.constants import appname
+from kitty.guess_mime_type import guess_type
+from kitty.types import run_once
 from kitty.typing import GRT_f, GRT_t
 from kitty.utils import (
     TTYIO, ScreenSize, ScreenSizeGetter, fit_image, screen_size_function
 )
 
 from ..tui.images import (
-    ConvertFailed, GraphicsCommand, NoImageMagick, OpenFailed, convert, fsenc,
-    identify
+    ConvertFailed, Dispose, GraphicsCommand, NoImageMagick, OpenFailed,
+    OutdatedImageMagick, RenderedImage, fsenc, identify,
+    render_as_single_image, render_image
 )
 from ..tui.operations import clear_images_on_screen, raw_mode
 
@@ -102,7 +103,7 @@ but you can turn it off or on explicitly, if needed.
 
 --silent
 type=bool-set
-Do not print out anything to stdout during operation.
+Do not print out anything to STDOUT during operation.
 
 
 --z-index -z
@@ -112,9 +113,17 @@ a double minus for values under the threshold for drawing images under cell back
 colors. For example, --1 evaluates as -1,073,741,825.
 
 
+--loop -l
+default=-1
+type=int
+Number of times to loop animations. Negative values loop forever. Zero means
+only the first frame of the animation is displayed. Otherwise, the animation
+is looped the specified number of times.
+
+
 --hold
 type=bool-set
-Wait for keypress before exiting after displaying the images.
+Wait for a key press before exiting after displaying the images.
 '''
 
 
@@ -134,7 +143,7 @@ def get_screen_size() -> ScreenSize:
     return screen_size()
 
 
-@lru_cache(maxsize=2)
+@run_once
 def options_spec() -> str:
     return OPTIONS.format(appname='{}-icat'.format(appname))
 
@@ -190,15 +199,20 @@ def set_cursor_for_place(place: 'Place', cmd: GraphicsCommand, width: int, heigh
 
 
 def write_chunked(cmd: GraphicsCommand, data: bytes) -> None:
+    cmd = cmd.clone()
     if cmd.f != 100:
         data = zlib.compress(data)
         cmd.o = 'z'
     data = standard_b64encode(data)
+    ac = cmd.a
+    quiet = cmd.q
     while data:
         chunk, data = data[:4096], data[4096:]
         cmd.m = 1 if data else 0
         write_gr_cmd(cmd, chunk)
         cmd.clear()
+        cmd.a = ac
+        cmd.q = quiet
 
 
 def show(
@@ -207,7 +221,8 @@ def show(
     fmt: 'GRT_f',
     transmit_mode: 'GRT_t' = 't',
     align: str = 'center',
-    place: Optional['Place'] = None
+    place: Optional['Place'] = None,
+    use_number: int = 0
 ) -> None:
     cmd = GraphicsCommand()
     cmd.a = 'T'
@@ -215,6 +230,9 @@ def show(
     cmd.s = width
     cmd.v = height
     cmd.z = zindex
+    if use_number:
+        cmd.I = use_number  # noqa
+        cmd.q = 2
     if place:
         set_cursor_for_place(place, cmd, width, height, align)
     else:
@@ -230,6 +248,58 @@ def show(
         if fmt == 100:
             cmd.S = len(data)
         write_chunked(cmd, data)
+
+
+def show_frames(frame_data: RenderedImage, use_number: int, loops: int) -> None:
+    transmit_cmd = GraphicsCommand()
+    transmit_cmd.a = 'f'
+    transmit_cmd.I = use_number  # noqa
+    transmit_cmd.q = 2
+    if can_transfer_with_files:
+        transmit_cmd.t = 't'
+    transmit_cmd.f = 24 if frame_data.mode == 'rgb' else 32
+
+    def control(frame_number: int = 0, loops: Optional[int] = None, gap: Optional[int] = 0, animation_control: int = 0) -> None:
+        cmd = GraphicsCommand()
+        cmd.a = 'a'
+        cmd.I = use_number  # noqa
+        cmd.r = frame_number
+        if loops is not None:
+            cmd.v = loops + 1
+        if gap is not None:
+            cmd.z = gap if gap > 0 else -1
+        if animation_control:
+            cmd.s = animation_control
+        write_gr_cmd(cmd)
+
+    anchor_frame = 0
+
+    for frame in frame_data.frames:
+        frame_number = frame.index + 1
+        if frame.dispose < Dispose.previous:
+            anchor_frame = frame_number
+        if frame_number == 1:
+            control(frame_number, gap=frame.gap, loops=None if loops < 1 else loops)
+            continue
+        if frame.dispose is Dispose.previous:
+            if anchor_frame != frame_number:
+                transmit_cmd.c = anchor_frame
+        else:
+            transmit_cmd.c = (frame_number - 1) if frame.needs_blend else 0
+        transmit_cmd.s = frame.width
+        transmit_cmd.v = frame.height
+        transmit_cmd.x = frame.canvas_x
+        transmit_cmd.y = frame.canvas_y
+        transmit_cmd.z = frame.gap if frame.gap > 0 else -1
+        if can_transfer_with_files:
+            write_gr_cmd(transmit_cmd, standard_b64encode(os.path.abspath(frame.path).encode(fsenc)))
+        else:
+            with open(frame.path, 'rb') as f:
+                data = f.read()
+            write_chunked(transmit_cmd, data)
+        if frame_number == 2:
+            control(animation_control=2)
+    control(animation_control=3)
 
 
 def parse_z_index(val: str) -> int:
@@ -254,6 +324,7 @@ def process(path: str, args: IcatCLIOptions, parsed_opts: ParsedOpts, is_tempfil
     needs_scaling = m.width > available_width or m.height > available_height
     needs_scaling = needs_scaling or args.scale_up
     file_removed = False
+    use_number = 0
     if m.fmt == 'png' and not needs_scaling:
         outfile = path
         transmit_mode: 'GRT_t' = 't' if is_tempfile else 'f'
@@ -263,8 +334,25 @@ def process(path: str, args: IcatCLIOptions, parsed_opts: ParsedOpts, is_tempfil
     else:
         fmt = 24 if m.mode == 'rgb' else 32
         transmit_mode = 't'
-        outfile, width, height = convert(path, m, available_width, available_height, args.scale_up)
-    show(outfile, width, height, parsed_opts.z_index, fmt, transmit_mode, align=args.align, place=parsed_opts.place)
+        if len(m) == 1 or args.loop == 0:
+            outfile, width, height = render_as_single_image(path, m, available_width, available_height, args.scale_up)
+        else:
+            import struct
+            use_number = max(1, struct.unpack('@I', os.urandom(4))[0])
+            with NamedTemporaryFile() as f:
+                prefix = f.name
+            frame_data = render_image(path, prefix, m, available_width, available_height, args.scale_up)
+            outfile, width, height = frame_data.frames[0].path, frame_data.width, frame_data.height
+    show(
+        outfile, width, height, parsed_opts.z_index, fmt, transmit_mode,
+        align=args.align, place=parsed_opts.place, use_number=use_number
+    )
+    if use_number:
+        show_frames(frame_data, use_number, args.loop)
+        if not can_transfer_with_files:
+            for fr in frame_data.frames:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(fr.path)
     if not args.place:
         print()  # ensure cursor is on a new line
     return file_removed
@@ -471,6 +559,9 @@ def main(args: List[str] = sys.argv) -> None:
         try:
             process_single_item(item, cli_opts, parsed_opts, url_pat)
         except NoImageMagick as e:
+            raise SystemExit(str(e))
+        except OutdatedImageMagick as e:
+            print(e.detailed_error, file=sys.stderr)
             raise SystemExit(str(e))
         except ConvertFailed as e:
             raise SystemExit(str(e))

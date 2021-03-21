@@ -7,7 +7,7 @@ from typing import Dict, Generator, List, Optional, Sequence, Tuple
 
 from kitty.borders import BorderColor
 from kitty.conf.utils import to_bool
-from kitty.constants import Edges
+from kitty.types import Edges
 from kitty.typing import EdgeLiteral, WindowType
 from kitty.window_list import WindowGroup, WindowList
 
@@ -169,7 +169,7 @@ class Tall(Layout):
                 if is_fat:
                     xl, yl = yl, xl
                 yield wg, xl, yl, True
-            size = (lgd.central.height if is_fat else lgd.central.width) - start
+            size = (lgd.central.bottom if is_fat else lgd.central.right) - start
 
         ylayout = self.variable_layout(all_windows, self.biased_map)
         for i, wg in enumerate(all_windows.iter_all_layoutable_groups()):

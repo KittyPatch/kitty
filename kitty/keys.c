@@ -10,44 +10,66 @@
 #include "screen.h"
 #include "glfw-wrapper.h"
 #include "control-codes.h"
+#include <structmember.h>
 
-static bool needs_special_handling[128 * 16] = {0};
+// python KeyEvent object {{{
+typedef struct {
+    PyObject_HEAD
+    PyObject *key, *shifted_key, *alternate_key;
+    PyObject *mods, *action, *native_key, *ime_state;
+    PyObject *text;
+} PyKeyEvent;
 
-const char*
-key_to_bytes(int glfw_key, bool smkx, bool extended, int mods, int action) {
-    if ((action & 3) == 3) return NULL;
-    if ((unsigned)glfw_key >= sizeof(key_map)/sizeof(key_map[0]) || glfw_key < 0) return NULL;
-    uint16_t key = key_map[glfw_key];
-    if (key == UINT8_MAX) return NULL;
-    KeyboardMode mode = extended ? EXTENDED : (smkx ? APPLICATION : NORMAL);
-    return key_lookup(key, mode, mods, action);
+static inline PyObject* convert_glfw_key_event_to_python(const GLFWkeyevent *ev);
+
+static PyObject*
+new(PyTypeObject *type UNUSED, PyObject *args, PyObject *kw) {
+    static char *kwds[] = {"key", "shifted_key", "alternate_key", "mods", "action", "native_key", "ime_state", "text", NULL};
+    GLFWkeyevent ev = {.action=GLFW_PRESS};
+    if (!PyArg_ParseTupleAndKeywords(args, kw, "I|IIiiiiz", kwds, &ev.key, &ev.shifted_key, &ev.alternate_key, &ev.mods, &ev.action, &ev.native_key, &ev.ime_state, &ev.text)) return NULL;
+    return convert_glfw_key_event_to_python(&ev);
 }
 
-#define SPECIAL_INDEX(key) ((key & 0x7f) | ( (mods & 0xF) << 7))
-#define IS_ALT_MODS(mods) (mods == GLFW_MOD_ALT || mods == (GLFW_MOD_ALT | GLFW_MOD_SHIFT))
-
-typedef struct { int mods, native_key; } NativeKey;
-static NativeKey *native_special_keys = NULL;
-static size_t native_special_keys_capacity = 0, native_special_keys_count = 0;
-
-void
-set_special_key_combo(int glfw_key, int mods, bool is_native) {
-    if (is_native) {
-        if (native_special_keys_count >= native_special_keys_capacity) {
-            native_special_keys_capacity = MAX(128u, 2 * native_special_keys_capacity);
-            native_special_keys = realloc(native_special_keys, sizeof(native_special_keys[0]) * native_special_keys_capacity);
-            if (native_special_keys == NULL) fatal("Out of memory");
-        }
-        native_special_keys[native_special_keys_count].mods = mods;
-        native_special_keys[native_special_keys_count++].native_key = glfw_key;
-    } else {
-        uint16_t key = key_map[glfw_key];
-        if (key != UINT8_MAX) {
-            key = SPECIAL_INDEX(key);
-            needs_special_handling[key] = true;
-        }
-    }
+static void
+dealloc(PyKeyEvent* self) {
+    Py_CLEAR(self->key); Py_CLEAR(self->shifted_key); Py_CLEAR(self->alternate_key);
+    Py_CLEAR(self->mods); Py_CLEAR(self->action); Py_CLEAR(self->native_key); Py_CLEAR(self->ime_state);
+    Py_CLEAR(self->text);
+    Py_TYPE(self)->tp_free((PyObject*)self);
 }
+
+static PyMemberDef members[] = {
+#define M(x) {#x, T_OBJECT, offsetof(PyKeyEvent, x), READONLY, #x}
+    M(key), M(shifted_key), M(alternate_key),
+    M(mods), M(action), M(native_key), M(ime_state),
+    M(text),
+    {NULL},
+#undef M
+};
+
+PyTypeObject PyKeyEvent_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "fast_data_types.KeyEvent",
+    .tp_basicsize = sizeof(PyKeyEvent),
+    .tp_dealloc = (destructor)dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = "A key event",
+    .tp_members = members,
+    .tp_new = new,
+};
+
+static inline PyObject*
+convert_glfw_key_event_to_python(const GLFWkeyevent *ev) {
+    PyKeyEvent *self = (PyKeyEvent*)PyKeyEvent_Type.tp_alloc(&PyKeyEvent_Type, 0);
+    if (!self) return NULL;
+#define C(x) { unsigned long t = ev->x; self->x = PyLong_FromUnsignedLong(t); if (self->x == NULL) { Py_CLEAR(self); return NULL; } }
+    C(key); C(shifted_key); C(alternate_key); C(mods); C(action); C(native_key); C(ime_state);
+#undef C
+    self->text = PyUnicode_FromString(ev->text ? ev->text : "");
+    if (!self->text) { Py_CLEAR(self); return NULL; }
+    return (PyObject*)self;
+}
+// }}}
 
 static inline Window*
 active_window(void) {
@@ -55,60 +77,6 @@ active_window(void) {
     Window *w = t->windows + t->active_window;
     if (w->render_data.screen) return w;
     return NULL;
-}
-
-static inline bool
-is_modifier_key(int key) {
-    switch(key) {
-        case GLFW_KEY_LEFT_SHIFT:
-        case GLFW_KEY_RIGHT_SHIFT:
-        case GLFW_KEY_LEFT_ALT:
-        case GLFW_KEY_RIGHT_ALT:
-        case GLFW_KEY_LEFT_CONTROL:
-        case GLFW_KEY_RIGHT_CONTROL:
-        case GLFW_KEY_LEFT_SUPER:
-        case GLFW_KEY_RIGHT_SUPER:
-        case GLFW_KEY_CAPS_LOCK:
-            return true;
-        default:
-            return false;
-    }
-}
-
-static inline void
-send_key_to_child(Window *w, int key, int mods, int action) {
-    Screen *screen = w->render_data.screen;
-    const char *data = key_to_bytes(key, screen->modes.mDECCKM, screen->modes.mEXTENDED_KEYBOARD, mods, action);
-    if (data) {
-        if (screen->modes.mEXTENDED_KEYBOARD) {
-            if (*data == 1) schedule_write_to_child(w->id, 1, (data + 1), 1);
-            else write_escape_code_to_child(screen, APC, data + 1);
-        } else {
-            if (*data > 2 && data[1] == 0x1b && data[2] == '[') { // CSI code
-                write_escape_code_to_child(screen, CSI, data + 3);
-            } else schedule_write_to_child(w->id, 1, (data + 1), *data);
-        }
-    }
-}
-
-static inline bool
-is_ascii_control_char(char c) {
-    return c == 0 || (1 <= c && c <= 31) || c == 127;
-}
-
-static inline bool
-check_if_special(int key, int mods, int native_key) {
-    uint16_t qkey = (0 <= key && key < (ssize_t)arraysz(key_map)) ? key_map[key] : UINT8_MAX;
-    bool special = false;
-    if (qkey != UINT8_MAX) {
-        qkey = SPECIAL_INDEX(qkey);
-        special = needs_special_handling[qkey];
-    }
-    for (size_t i = 0; !special && i < native_special_keys_count; i++) {
-        if (native_key == native_special_keys[i].native_key && mods == native_special_keys[i].mods)
-          special = true;
-    }
-    return special;
 }
 
 static inline void
@@ -120,12 +88,11 @@ update_ime_position(OSWindow *os_window, Window* w, Screen *screen) {
     glfwUpdateIMEState(global_state.callback_os_window->handle, 2, left, top, cell_width, cell_height);
 }
 
-#define debug(...) if (OPT(debug_keyboard)) printf(__VA_ARGS__);
-
 void
 on_key_input(GLFWkeyevent *ev) {
     Window *w = active_window();
-    int action = ev->action, native_key = ev->native_key, key = ev->key, mods = ev->mods;
+    const int action = ev->action, mods = ev->mods;
+    const uint32_t key = ev->key, native_key = ev->native_key;
     const char *text = ev->text ? ev->text : "";
 
     debug("on_key_input: glfw key: %d native_code: 0x%x action: %s mods: 0x%x text: '%s' state: %d ",
@@ -135,6 +102,8 @@ on_key_input(GLFWkeyevent *ev) {
     if (!w) { debug("no active window, ignoring\n"); return; }
     if (OPT(mouse_hide_wait) < 0 && !is_modifier_key(key)) hide_mouse(global_state.callback_os_window);
     Screen *screen = w->render_data.screen;
+    id_type active_window_id = w->id;
+
     switch(ev->ime_state) {
         case 1:  // update pre-edit text
             update_ime_position(global_state.callback_os_window, w, screen);
@@ -159,29 +128,47 @@ on_key_input(GLFWkeyevent *ev) {
             debug("invalid state, ignoring\n");
             return;
     }
+    PyObject *ke = NULL;
+#define create_key_event() { ke = convert_glfw_key_event_to_python(ev); if (!ke) { PyErr_Print(); return; } }
     if (global_state.in_sequence_mode) {
         debug("in sequence mode, handling as shortcut\n");
         if (
-            action != GLFW_RELEASE &&
-            key != GLFW_KEY_LEFT_SHIFT && key != GLFW_KEY_RIGHT_SHIFT && key != GLFW_KEY_LEFT_ALT && key != GLFW_KEY_RIGHT_ALT && key != GLFW_KEY_LEFT_CONTROL && key != GLFW_KEY_RIGHT_CONTROL
-        ) call_boss(process_sequence, "iiii", key, native_key, action, mods);
+            action != GLFW_RELEASE && !is_modifier_key(key)
+        ) {
+            w->last_special_key_pressed = key;
+            create_key_event();
+            call_boss(process_sequence, "O", ke);
+            Py_CLEAR(ke);
+        }
         return;
     }
-    bool has_text = text[0] && !is_ascii_control_char(text[0]);
+
     if (action == GLFW_PRESS || action == GLFW_REPEAT) {
-        if (check_if_special(key, mods, native_key)) {
-            PyObject *ret = PyObject_CallMethod(global_state.boss, "dispatch_special_key", "iiii", key, native_key, action, mods);
-            if (ret == NULL) { PyErr_Print(); }
-            else {
-                bool consumed = ret == Py_True;
-                Py_DECREF(ret);
-                if (consumed) {
-                    debug("handled as shortcut\n");
-                    return;
-                }
+        create_key_event();
+        w->last_special_key_pressed = 0;
+        PyObject *ret = PyObject_CallMethod(global_state.boss, "dispatch_possible_special_key", "O", ke);
+        Py_CLEAR(ke);
+        bool consumed = false;
+        // the shortcut could have created a new window or closed the
+        // window, rendering the pointer no longer valid
+        w = window_for_window_id(active_window_id);
+        if (ret == NULL) { PyErr_Print(); }
+        else {
+            consumed = ret == Py_True;
+            Py_DECREF(ret);
+            if (consumed) {
+                debug("handled as shortcut\n");
+                if (w) w->last_special_key_pressed = key;
+                return;
             }
         }
+        if (!w) return;
+    } else if (w->last_special_key_pressed == key) {
+        w->last_special_key_pressed = 0;
+        debug("ignoring release event for previous press that was handled as shortcut");
+        return;
     }
+#undef create_key_event
     if (action == GLFW_REPEAT && !screen->modes.mDECARM) {
         debug("discarding repeat key event as DECARM is off\n");
         return;
@@ -189,15 +176,14 @@ on_key_input(GLFWkeyevent *ev) {
     if (screen->scrolled_by && action == GLFW_PRESS && !is_modifier_key(key)) {
         screen_history_scroll(screen, SCROLL_FULL, false);  // scroll back to bottom
     }
-    bool ok_to_send = action == GLFW_PRESS || action == GLFW_REPEAT || screen->modes.mEXTENDED_KEYBOARD;
-    if (ok_to_send) {
-        if (has_text) {
-            schedule_write_to_child(w->id, 1, text, strlen(text));
-            debug("sent text to child\n");
-        } else {
-            send_key_to_child(w, key, mods, action);
-            debug("sent key to child\n");
-        }
+    char encoded_key[KEY_BUFFER_SIZE] = {0};
+    int size = encode_glfw_key_event(ev, screen->modes.mDECCKM, screen_current_key_encoding_flags(screen), encoded_key);
+    if (size == SEND_TEXT_TO_CHILD) {
+        schedule_write_to_child(w->id, 1, text, strlen(text));
+        debug("sent text to child\n");
+    } else if (size > 0) {
+        schedule_write_to_child(w->id, 1, encoded_key, size);
+        debug("sent key to child\n");
     } else {
         debug("ignoring as keyboard mode does not allow %s events\n", action == GLFW_RELEASE ? "release" : "repeat");
     }
@@ -206,24 +192,24 @@ on_key_input(GLFWkeyevent *ev) {
 void
 fake_scroll(Window *w, int amount, bool upwards) {
     if (!w) return;
-    int key = upwards ? GLFW_KEY_UP : GLFW_KEY_DOWN;
+    int key = upwards ? GLFW_FKEY_UP : GLFW_FKEY_DOWN;
+    GLFWkeyevent ev = {.key = key };
+    char encoded_key[KEY_BUFFER_SIZE] = {0};
+    Screen *screen = w->render_data.screen;
+    uint8_t flags = screen_current_key_encoding_flags(screen);
     while (amount-- > 0) {
-        send_key_to_child(w, key, 0, GLFW_PRESS);
-        send_key_to_child(w, key, 0, GLFW_RELEASE);
+        ev.action = GLFW_PRESS;
+        int size = encode_glfw_key_event(&ev, screen->modes.mDECCKM, flags, encoded_key);
+        if (size > 0) schedule_write_to_child(w->id, 1, encoded_key, size);
+        ev.action = GLFW_RELEASE;
+        size = encode_glfw_key_event(&ev, screen->modes.mDECCKM, flags, encoded_key);
+        if (size > 0) schedule_write_to_child(w->id, 1, encoded_key, size);
     }
 }
 
 #define PYWRAP1(name) static PyObject* py##name(PyObject UNUSED *self, PyObject *args)
 #define PA(fmt, ...) if(!PyArg_ParseTuple(args, fmt, __VA_ARGS__)) return NULL;
-#define M(name, arg_type) {#name, (PyCFunction)py##name, arg_type, NULL}
-
-PYWRAP1(key_to_bytes) {
-    int glfw_key, smkx, extended, mods, action;
-    PA("ippii", &glfw_key, &smkx, &extended, &mods, &action);
-    const char *ans = key_to_bytes(glfw_key, smkx & 1, extended & 1, mods, action);
-    if (ans == NULL) return Py_BuildValue("y#", "", 0);
-    return Py_BuildValue("y#", ans + 1, *ans);
-}
+#define M(name, arg_type) {#name, (PyCFunction)(void (*) (void))(py##name), arg_type, NULL}
 
 PYWRAP1(key_for_native_key_name) {
     const char *name;
@@ -238,23 +224,31 @@ PYWRAP1(key_for_native_key_name) {
     Py_RETURN_NONE;
 }
 
+static PyObject*
+pyencode_key_for_tty(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
+    static char *kwds[] = {"key", "shifted_key", "alternate_key", "mods", "action", "key_encoding_flags", "text", "cursor_key_mode", NULL};
+    unsigned int key = 0, shifted_key = 0, alternate_key = 0, mods = 0, action = GLFW_PRESS, key_encoding_flags = 0;
+    const char *text = NULL;
+    int cursor_key_mode = 0;
+    if (!PyArg_ParseTupleAndKeywords(args, kw, "I|IIIIIzp", kwds, &key, &shifted_key, &alternate_key, &mods, &action, &key_encoding_flags, &text, &cursor_key_mode)) return NULL;
+    GLFWkeyevent ev = { .key = key, .shifted_key = shifted_key, .alternate_key = alternate_key, .text = text, .action = action, .mods = mods };
+    char output[KEY_BUFFER_SIZE+1] = {0};
+    int num = encode_glfw_key_event(&ev, cursor_key_mode, key_encoding_flags, output);
+    if (num == SEND_TEXT_TO_CHILD) return PyUnicode_FromString(text);
+    return PyUnicode_FromStringAndSize(output, MAX(0, num));
+}
+
 static PyMethodDef module_methods[] = {
-    M(key_to_bytes, METH_VARARGS),
     M(key_for_native_key_name, METH_VARARGS),
+    M(encode_key_for_tty, METH_VARARGS | METH_KEYWORDS),
     {0}
 };
-
-void
-finalize(void) {
-    free(native_special_keys);
-}
 
 bool
 init_keys(PyObject *module) {
     if (PyModule_AddFunctions(module, module_methods) != 0) return false;
-    if (Py_AtExit(finalize) != 0) {
-        PyErr_SetString(PyExc_RuntimeError, "Failed to register the keys at exit handler");
-        return false;
-    }
+    if (PyType_Ready(&PyKeyEvent_Type) < 0) return false;
+    if (PyModule_AddObject(module, "KeyEvent", (PyObject *)&PyKeyEvent_Type) != 0) return 0;
+    Py_INCREF(&PyKeyEvent_Type);
     return true;
 }

@@ -942,10 +942,13 @@ void _glfwPlatformDestroyWindow(_GLFWwindow* window)
         _glfw.wl.pointerFocus = NULL;
         _glfwInputCursorEnter(window, false);
     }
-    if (window == _glfw.wl.keyboardFocus)
+    if (window->id == _glfw.wl.keyboardFocusId)
     {
-        _glfw.wl.keyboardFocus = NULL;
+        _glfw.wl.keyboardFocusId = 0;
         _glfwInputWindowFocus(window, false);
+    }
+    if (window->id == _glfw.wl.keyRepeatInfo.keyboardFocusId) {
+        _glfw.wl.keyRepeatInfo.keyboardFocusId = 0;
     }
 
     if (window->wl.idleInhibitor)
@@ -1002,9 +1005,12 @@ void _glfwPlatformGetWindowPos(_GLFWwindow* window UNUSED, int* xpos UNUSED, int
 {
     // A Wayland client is not aware of its position, so just warn and leave it
     // as (0, 0)
-
-    _glfwInputError(GLFW_FEATURE_UNAVAILABLE,
-                    "Wayland: The platform does not provide the window position");
+    static bool warned_once = false;
+    if (!warned_once) {
+        _glfwInputError(GLFW_FEATURE_UNAVAILABLE,
+                        "Wayland: The platform does not provide the window position");
+        warned_once = true;
+    }
 }
 
 void _glfwPlatformSetWindowPos(_GLFWwindow* window UNUSED, int xpos UNUSED, int ypos UNUSED)
@@ -1198,7 +1204,7 @@ void _glfwPlatformSetWindowMonitor(_GLFWwindow* window,
 
 int _glfwPlatformWindowFocused(_GLFWwindow* window)
 {
-    return _glfw.wl.keyboardFocus == window;
+    return _glfw.wl.keyboardFocusId = window ? window->id : 0;
 }
 
 int _glfwPlatformWindowOccluded(_GLFWwindow* window UNUSED)
@@ -1346,7 +1352,7 @@ const char* _glfwPlatformGetNativeKeyName(int native_key)
     return glfw_xkb_keysym_name(native_key);
 }
 
-int _glfwPlatformGetNativeKeyForKey(int key)
+int _glfwPlatformGetNativeKeyForKey(uint32_t key)
 {
     return glfw_xkb_sym_for_key(key);
 }

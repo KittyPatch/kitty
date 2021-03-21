@@ -252,6 +252,15 @@ historybuf_add_line(HistoryBuf *self, const Line *line, ANSIBuf *as_ansi_buf) {
     *attrptr(self, idx) = (line->continued & CONTINUED_MASK) | (line->has_dirty_text ? TEXT_DIRTY_MASK : 0);
 }
 
+bool
+historybuf_pop_line(HistoryBuf *self, Line *line) {
+    if (self->count <= 0) return false;
+    index_type idx = (self->start_of_data + self->count - 1) % self->ynum;
+    init_line(self, idx, line);
+    self->count--;
+    return true;
+}
+
 static PyObject*
 line(HistoryBuf *self, PyObject *val) {
 #define line_doc "Return the line with line number val. This buffer grows upwards, i.e. 0 is the most recently added line"
@@ -397,7 +406,7 @@ pagerhist_write(HistoryBuf *self, PyObject *what) {
 
 static PyObject*
 pagerhist_as_bytes(HistoryBuf *self, PyObject *args UNUSED) {
-    PagerHistoryBuf *ph = self->pagerhist;
+#define ph self->pagerhist
     if (!ph || !ringbuf_bytes_used(ph->ringbuf)) return PyBytes_FromStringAndSize("", 0);
     pagerhist_ensure_start_is_valid_utf8(ph);
     if (ph->rewrap_needed) pagerhist_rewrap_to(self, self->xnum);
@@ -411,6 +420,7 @@ pagerhist_as_bytes(HistoryBuf *self, PyObject *args UNUSED) {
     ringbuf_memcpy_from(buf, ph->ringbuf, sz);
     if (!l.continued) buf[sz-1] = '\n';
     return ans;
+#undef ph
 }
 
 static PyObject *

@@ -19,13 +19,13 @@ from typing import (
 )
 
 from .constants import (
-    appname, is_macos, is_wayland, shell_path, supports_primary_selection
+    appname, is_macos, is_wayland, read_kitty_resource, shell_path,
+    supports_primary_selection
 )
 from .options_stub import Options
 from .rgb import Color, to_color
+from .types import ConvertibleToNumbers, run_once
 from .typing import AddressFamily, PopenType, Socket, StartupCtx
-
-BASE = os.path.dirname(os.path.abspath(__file__))
 
 
 def expandvars(val: str, env: Mapping[str, str] = {}, fallback_to_os_env: bool = True) -> str:
@@ -58,11 +58,11 @@ def platform_window_id(os_window_id: int) -> Optional[int]:
 
 def load_shaders(name: str) -> Tuple[str, str]:
     from .fast_data_types import GLSL_VERSION
-    with open(os.path.join(BASE, '{}_vertex.glsl'.format(name))) as f:
-        vert = f.read().replace('GLSL_VERSION', str(GLSL_VERSION), 1)
-    with open(os.path.join(BASE, '{}_fragment.glsl'.format(name))) as f:
-        frag = f.read().replace('GLSL_VERSION', str(GLSL_VERSION), 1)
-    return vert, frag
+
+    def load(which: str) -> str:
+        return read_kitty_resource(f'{name}_{which}.glsl').decode('utf-8').replace('GLSL_VERSION', str(GLSL_VERSION), 1)
+
+    return load('vertex'), load('fragment')
 
 
 def safe_print(*a: Any, **k: Any) -> None:
@@ -462,7 +462,7 @@ def natsort_ints(iterable: Iterable[str]) -> List[str]:
     return sorted(iterable, key=alphanum_key)
 
 
-@lru_cache(maxsize=2)
+@run_once
 def get_editor() -> List[str]:
     import shlex
     import shutil
@@ -511,7 +511,7 @@ def resolved_shell(opts: Optional[Options] = None) -> List[str]:
     return ans
 
 
-@lru_cache(maxsize=2)
+@run_once
 def system_paths_on_macos() -> List[str]:
     entries, seen = [], set()
 
@@ -537,6 +537,7 @@ def system_paths_on_macos() -> List[str]:
     return entries
 
 
+@lru_cache(maxsize=32)
 def find_exe(name: str) -> Optional[str]:
     import shutil
     ans = shutil.which(name)
@@ -632,3 +633,11 @@ class SSHConnectionData(NamedTuple):
     binary: str
     hostname: str
     port: Optional[int] = None
+
+
+def positive_int(x: ConvertibleToNumbers) -> int:
+    return max(0, int(x))
+
+
+def positive_float(x: ConvertibleToNumbers) -> float:
+    return max(0, float(x))

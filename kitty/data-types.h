@@ -14,6 +14,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include "glfw-wrapper.h"
+#include "banned.h"
 // Required minimum OpenGL version
 #define OPENGL_REQUIRED_VERSION_MAJOR 3
 #define OPENGL_REQUIRED_VERSION_MINOR 3
@@ -37,6 +38,8 @@
 #define zero_at_ptr_count(p, count) memset((p), 0, (count) * sizeof((p)[0]))
 void log_error(const char *fmt, ...) __attribute__ ((format (printf, 1, 2)));
 #define fatal(...) { log_error(__VA_ARGS__); exit(EXIT_FAILURE); }
+static inline void cleanup_free(void *p) { free(*(void**)p); }
+#define FREE_AFTER_FUNCTION __attribute__((cleanup(cleanup_free)))
 
 typedef unsigned long long id_type;
 typedef uint32_t char_type;
@@ -299,8 +302,8 @@ void cursor_reset(Cursor*);
 Cursor* cursor_copy(Cursor*);
 void cursor_copy_to(Cursor *src, Cursor *dest);
 void cursor_reset_display_attrs(Cursor*);
-void cursor_from_sgr(Cursor *self, unsigned int *params, unsigned int count);
-void apply_sgr_to_cells(GPUCell *first_cell, unsigned int cell_count, unsigned int *params, unsigned int count);
+void cursor_from_sgr(Cursor *self, int *params, unsigned int count);
+void apply_sgr_to_cells(GPUCell *first_cell, unsigned int cell_count, int *params, unsigned int count);
 const char* cell_as_sgr(const GPUCell *, const GPUCell *);
 const char* cursor_as_sgr(const Cursor *);
 
@@ -320,7 +323,6 @@ void enter_event(void);
 void mouse_event(int, int, int);
 void focus_in_event(void);
 void scroll_event(double, double, int, int);
-void set_special_key_combo(int glfw_key, int mods, bool is_native);
 void on_key_input(GLFWkeyevent *ev);
 void request_window_attention(id_type, bool);
 #ifndef __APPLE__
@@ -330,10 +332,4 @@ SPRITE_MAP_HANDLE alloc_sprite_map(unsigned int, unsigned int);
 SPRITE_MAP_HANDLE free_sprite_map(SPRITE_MAP_HANDLE);
 const char* get_hyperlink_for_id(const HYPERLINK_POOL_HANDLE, hyperlink_id_type id, bool only_url);
 
-static inline void safe_close(int fd, const char* file UNUSED, const int line UNUSED) {
-#if 0
-    printf("Closing fd: %d from file: %s line: %d\n", fd, file, line);
-#endif
-    while(close(fd) != 0 && errno == EINTR);
-}
 void log_event(const char *format, ...) __attribute__((format(printf, 1, 2)));

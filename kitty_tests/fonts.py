@@ -2,8 +2,16 @@
 # vim:fileencoding=utf-8
 # License: GPL v3 Copyright: 2017, Kovid Goyal <kovid at kovidgoyal.net>
 
+import os
+import shutil
 import sys
+import tempfile
 import unittest
+from functools import partial
+try:
+    from importlib.resources import read_binary
+except ImportError:
+    from importlib_resources import read_binary
 
 from kitty.constants import is_macos
 from kitty.fast_data_types import (
@@ -30,10 +38,12 @@ class Rendering(BaseTest):
             self.test_ctx.__exit__()
             del self.test_ctx
             raise
+        self.tdir = tempfile.mkdtemp()
 
     def tearDown(self):
         self.test_ctx.__exit__()
         del self.sprites, self.cell_width, self.cell_height, self.test_ctx
+        shutil.rmtree(self.tdir)
 
     def test_sprite_map(self):
         sprite_map_set_limits(10, 2)
@@ -71,19 +81,40 @@ class Rendering(BaseTest):
 
     def test_shaping(self):
 
-        def groups(text, path=None):
-            return [x[:2] for x in shape_string(text, path=path)]
+        font_path_cache = {}
 
-        self.ae(groups('abcd'), [(1, 1) for i in range(4)])
-        self.ae(groups('A=>>B!=C', path='kitty_tests/FiraCode-Medium.otf'), [(1, 1), (3, 3), (1, 1), (2, 2), (1, 1)])
-        self.ae(groups('F--a--', path='kitty_tests/FiraCode-Medium.otf'), [(1, 1), (2, 2), (1, 1), (2, 2)])
-        self.ae(groups('==!=<>==<><><>', path='kitty_tests/FiraCode-Medium.otf'), [(2, 2), (2, 2), (2, 2), (2, 2), (2, 2), (2, 2), (2, 2)])
-        colon_glyph = shape_string('9:30', path='kitty_tests/FiraCode-Medium.otf')[1][2]
-        self.assertNotEqual(colon_glyph, shape_string(':', path='kitty_tests/FiraCode-Medium.otf')[0][2])
-        self.ae(colon_glyph, 998)
-        self.ae(groups('9:30', path='kitty_tests/FiraCode-Medium.otf'), [(1, 1), (1, 1), (1, 1), (1, 1)])
+        def path_for_font(name):
+            if name not in font_path_cache:
+                with open(os.path.join(self.tdir, name), 'wb') as f:
+                    font_path_cache[name] = f.name
+                    data = read_binary(__name__.rpartition('.')[0], name)
+                    f.write(data)
+            return font_path_cache[name]
+
+        def ss(text, font=None):
+            path = path_for_font(font) if font else None
+            return shape_string(text, path=path)
+
+        def groups(text, font=None):
+            return [x[:2] for x in ss(text, font)]
+
+        for font in ('FiraCode-Medium.otf', 'CascadiaCode-Regular.otf'):
+            g = partial(groups, font=font)
+            self.ae(g('abcd'), [(1, 1) for i in range(4)])
+            self.ae(g('----'), [(4, 4)])
+            self.ae(g('A===B!=C'), [(1, 1), (3, 3), (1, 1), (2, 2), (1, 1)])
+            self.ae(g('F--a--'), [(1, 1), (2, 2), (1, 1), (2, 2)])
+            self.ae(g('===--<>=='), [(3, 3), (2, 2), (2, 2), (2, 2)])
+            self.ae(g('==!=<>==<><><>'), [(4, 4), (2, 2), (2, 2), (2, 2), (2, 2), (2, 2)])
+            self.ae(g('A=>>B!=C'), [(1, 1), (3, 3), (1, 1), (2, 2), (1, 1)])
+            self.ae(g('-' * 18), [(9, 9), (9, 9)])
+        colon_glyph = ss('9:30', font='FiraCode-Medium.otf')[1][2]
+        self.assertNotEqual(colon_glyph, ss(':', font='FiraCode-Medium.otf')[0][2])
+        self.ae(colon_glyph, 1031)
+        self.ae(groups('9:30', font='FiraCode-Medium.otf'), [(1, 1), (1, 1), (1, 1), (1, 1)])
+
         self.ae(groups('|\U0001F601|\U0001F64f|\U0001F63a|'), [(1, 1), (2, 1), (1, 1), (2, 1), (1, 1), (2, 1), (1, 1)])
-        self.ae(groups('He\u0347\u0305llo\u0337,', path='kitty_tests/LiberationMono-Regular.ttf'),
+        self.ae(groups('He\u0347\u0305llo\u0337,', font='LiberationMono-Regular.ttf'),
                 [(1, 1), (1, 3), (1, 1), (1, 1), (1, 2), (1, 1)])
 
     def test_emoji_presentation(self):
