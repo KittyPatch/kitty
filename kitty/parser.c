@@ -22,10 +22,14 @@ static uint64_t pow10_array[] = {
     1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000, 10000000000
 };
 
-static inline uint64_t
-utoi(uint32_t *buf, unsigned int sz) {
-    uint64_t ans = 0;
-    uint32_t *p = buf;
+static inline int64_t
+utoi(const uint32_t *buf, unsigned int sz) {
+    int64_t ans = 0;
+    const uint32_t *p = buf;
+    int mult = 1;
+    if (sz && *p == '-') {
+        mult = -1; p++; sz--;
+    }
     // Ignore leading zeros
     while(sz > 0) {
         if (*p == '0') { p++; sz--; }
@@ -36,7 +40,7 @@ utoi(uint32_t *buf, unsigned int sz) {
             ans += (p[i] - '0') * pow10_array[j];
         }
     }
-    return ans;
+    return ans * mult;
 }
 
 
@@ -79,12 +83,12 @@ _report_error(PyObject *dump_callback, const char *fmt, ...) {
 }
 
 static void
-_report_params(PyObject *dump_callback, const char *name, unsigned int *params, unsigned int count, Region *r) {
+_report_params(PyObject *dump_callback, const char *name, int *params, unsigned int count, Region *r) {
     static char buf[MAX_PARAMS*3] = {0};
     unsigned int i, p=0;
     if (r) p += snprintf(buf + p, sizeof(buf) - 2, "%u %u %u %u ", r->top, r->left, r->bottom, r->right);
     for(i = 0; i < count && p < MAX_PARAMS*3-20; i++) {
-        int n = snprintf(buf + p, MAX_PARAMS*3 - p, "%u ", params[i]);
+        int n = snprintf(buf + p, MAX_PARAMS*3 - p, "%i ", params[i]);
         if (n < 0) break;
         p += n;
     }
@@ -360,7 +364,8 @@ dispatch_osc(Screen *screen, PyObject DUMP_UNUSED *dump_callback) {
 #define END_DISPATCH Py_CLEAR(string); } PyErr_Clear(); break; }
 
     const unsigned int limit = screen->parser_buf_pos;
-    unsigned int code=0, i;
+    int code=0;
+    unsigned int i;
     for (i = 0; i < MIN(limit, 5u); i++) {
         if (screen->parser_buf[i] < '0' || screen->parser_buf[i] > '9') break;
     }
@@ -386,6 +391,10 @@ dispatch_osc(Screen *screen, PyObject DUMP_UNUSED *dump_callback) {
         case 104:
             START_DISPATCH
             DISPATCH_OSC_WITH_CODE(set_color_table_color);
+            END_DISPATCH
+        case 7:
+            START_DISPATCH
+            DISPATCH_OSC_WITH_CODE(process_cwd_notification);
             END_DISPATCH
         case 8:
             dispatch_hyperlink(screen, i, limit-i, dump_callback);
@@ -432,15 +441,24 @@ dispatch_osc(Screen *screen, PyObject DUMP_UNUSED *dump_callback) {
 // }}}
 
 // CSI mode {{{
+// As per ECMA 48 section 5.4 secondary byte is column 02 of the 7-bit ascii table
 #define CSI_SECONDARY \
-        case ';': \
-        case ':': \
-        case '"': \
-        case '*': \
-        case '\'': \
         case ' ': \
+        case '!': \
+        case '"': \
+        case '#': \
         case '$': \
-        case '#':
+        case '%': \
+        case '&': \
+        case '\'': \
+        case '(': \
+        case ')': \
+        case '*': \
+        case '+': \
+        case ',': \
+        case '-': \
+        case '.': \
+        case '/':
 
 
 static inline void
@@ -451,12 +469,12 @@ static inline void
 screen_tabn(Screen *s, unsigned int count) { for (index_type i=0; i < MAX(1u, count); i++) screen_tab(s); }
 
 static inline const char*
-repr_csi_params(unsigned int *params, unsigned int num_params) {
+repr_csi_params(int *params, unsigned int num_params) {
     if (!num_params) return "";
     static char buf[256];
     unsigned int pos = 0, i = 0;
     while (pos < 200 && i++ < num_params && sizeof(buf) > pos + 1) {
-        const char *fmt = i < num_params ? "%u, " : "%u";
+        const char *fmt = i < num_params ? "%i, " : "%i";
         int ret = snprintf(buf + pos, sizeof(buf) - pos - 1, fmt, params[i-1]);
         if (ret < 0) return "An error occurred formatting the params array";
         pos += ret;
@@ -469,7 +487,7 @@ repr_csi_params(unsigned int *params, unsigned int num_params) {
 static
 #endif
 void
-parse_sgr(Screen *screen, uint32_t *buf, unsigned int num, unsigned int *params, PyObject DUMP_UNUSED *dump_callback, const char *report_name DUMP_UNUSED, Region *region) {
+parse_sgr(Screen *screen, uint32_t *buf, unsigned int num, int *params, PyObject DUMP_UNUSED *dump_callback, const char *report_name DUMP_UNUSED, Region *region) {
     enum State { START, NORMAL, MULTIPLE, COLOR, COLOR1, COLOR3 };
     enum State state = START;
     unsigned int num_params, num_start, i;
@@ -597,7 +615,8 @@ parse_sgr(Screen *screen, uint32_t *buf, unsigned int num, unsigned int *params,
 
 static inline unsigned int
 parse_region(Region *r, uint32_t *buf, unsigned int num) {
-    unsigned int i, start, params[8] = {0}, num_params=0;
+    unsigned int i, start, num_params = 0;
+    int params[8] = {0};
     for (i=0, start=0; i < num && num_params < 4; i++) {
         switch(buf[i]) {
             IS_DIGIT
@@ -631,34 +650,61 @@ parse_region(Region *r, uint32_t *buf, unsigned int num) {
 
 static inline void
 dispatch_csi(Screen *screen, PyObject DUMP_UNUSED *dump_callback) {
+#define AT_MOST_ONE_PARAMETER { \
+    if (num_params > 1) { \
+        REPORT_ERROR("CSI code 0x%x has %u > 1 parameters", code, num_params); \
+        break; \
+    } \
+}
+#define NON_NEGATIVE_PARAM(x) { \
+    if (x < 0) { \
+        REPORT_ERROR("CSI code 0x%x is not allowed to have negative parameter (%d)", code, x); \
+        break; \
+    } \
+}
+
 #define CALL_CSI_HANDLER1(name, defval) \
+    AT_MOST_ONE_PARAMETER; \
     p1 = num_params > 0 ? params[0] : defval; \
+    NON_NEGATIVE_PARAM(p1); \
     REPORT_COMMAND(name, p1); \
     name(screen, p1); \
     break;
 
 #define CALL_CSI_HANDLER1P(name, defval, qch) \
+    AT_MOST_ONE_PARAMETER; \
     p1 = num_params > 0 ? params[0] : defval; \
+    NON_NEGATIVE_PARAM(p1); \
     private = start_modifier == qch; \
     REPORT_COMMAND(name, p1, private); \
     name(screen, p1, private); \
     break;
 
 #define CALL_CSI_HANDLER1S(name, defval) \
+    AT_MOST_ONE_PARAMETER; \
     p1 = num_params > 0 ? params[0] : defval; \
+    NON_NEGATIVE_PARAM(p1); \
     REPORT_COMMAND(name, p1, start_modifier); \
     name(screen, p1, start_modifier); \
     break;
 
 #define CALL_CSI_HANDLER1M(name, defval) \
+    AT_MOST_ONE_PARAMETER; \
     p1 = num_params > 0 ? params[0] : defval; \
+    NON_NEGATIVE_PARAM(p1); \
     REPORT_COMMAND(name, p1, end_modifier); \
     name(screen, p1, end_modifier); \
     break;
 
 #define CALL_CSI_HANDLER2(name, defval1, defval2) \
+    if (num_params > 2) { \
+        REPORT_ERROR("CSI code 0x%x has %u > 2 parameters", code, num_params); \
+        break; \
+    } \
     p1 = num_params > 0 ? params[0] : defval1; \
     p2 = num_params > 1 ? params[1] : defval2; \
+    NON_NEGATIVE_PARAM(p1); \
+    NON_NEGATIVE_PARAM(p2); \
     REPORT_COMMAND(name, p1, p2); \
     name(screen, p1, p2); \
     break;
@@ -666,6 +712,7 @@ dispatch_csi(Screen *screen, PyObject DUMP_UNUSED *dump_callback) {
 #define SET_MODE(func) \
     p1 = start_modifier == '?' ? 5 : 0; \
     for (i = 0; i < num_params; i++) { \
+        NON_NEGATIVE_PARAM(params[i]); \
         REPORT_COMMAND(func, params[i], start_modifier == '?'); \
         func(screen, params[i] << p1); \
     } \
@@ -676,39 +723,47 @@ dispatch_csi(Screen *screen, PyObject DUMP_UNUSED *dump_callback) {
         if (special && modifier == special) { REPORT_ERROR(special_msg); } \
         else { REPORT_ERROR("CSI code 0x%x has unsupported start modifier: 0x%x or end modifier: 0x%x", code, start_modifier, end_modifier);} \
         break; \
-    }}
+    } \
+}
 
     char start_modifier = 0, end_modifier = 0;
     uint32_t *buf = screen->parser_buf, code = screen->parser_buf[screen->parser_buf_pos];
-    unsigned int num = screen->parser_buf_pos, start, i, num_params=0, p1, p2;
-    static unsigned int params[MAX_PARAMS] = {0};
+    unsigned int num = screen->parser_buf_pos, start, i, num_params=0;
+    static int params[MAX_PARAMS] = {0}, p1, p2;
     bool private;
-    if (buf[0] == '>' || buf[0] == '?' || buf[0] == '!' || buf[0] == '=' || buf[0] == '-') {
+    if (buf[0] == '>' || buf[0] == '<' || buf[0] == '?' || buf[0] == '!' || buf[0] == '=') {
         start_modifier = (char)screen->parser_buf[0];
         buf++; num--;
     }
-    if (code == SGR && !start_modifier) {
+    if (num > 0) {
+        switch(buf[num-1]) {
+            CSI_SECONDARY
+                end_modifier = (char)buf[--num];
+                break;
+        }
+    }
+    if (code == SGR && !start_modifier && !end_modifier) {
         parse_sgr(screen, buf, num, params, dump_callback, "select_graphic_rendition", NULL);
         return;
     }
-    if (code == 'r' && !start_modifier && num > 0 && buf[num - 1] == '$') {
+    if (code == 'r' && !start_modifier && end_modifier == '$') {
         // DECCARA
         Region r = {0};
-        unsigned int consumed = parse_region(&r, buf, --num);
+        unsigned int consumed = parse_region(&r, buf, num);
         num -= consumed; buf += consumed;
         parse_sgr(screen, buf, num, params, dump_callback, "deccara", &r);
         return;
     }
 
-    if (num > 0) {
-        switch(buf[num-1]) {
-            CSI_SECONDARY
-                end_modifier = (char)buf[--num];
-        }
-    }
     for (i=0, start=0; i < num; i++) {
         switch(buf[i]) {
             IS_DIGIT
+                break;
+            case '-':
+                if (i > start) {
+                    REPORT_ERROR("CSI code can contain hyphens only at the start of numbers");
+                    return;
+                }
                 break;
             default:
                 if (i > start) params[num_params++] = utoi(buf + start, i - start);
@@ -807,7 +862,7 @@ dispatch_csi(Screen *screen, PyObject DUMP_UNUSED *dump_callback) {
                 break;
             }
             if (start_modifier || end_modifier) {
-                REPORT_ERROR("Unknown CSI t sequence with start and end modifiers: '%c' '%c', %u parameters and first parameter: %u", start_modifier, end_modifier, num_params, params[0]);
+                REPORT_ERROR("Unknown CSI t sequence with start and end modifiers: '%c' '%c', %u parameters and first parameter: %d", start_modifier, end_modifier, num_params, params[0]);
                 break;
             }
             switch(params[0]) {
@@ -825,7 +880,7 @@ dispatch_csi(Screen *screen, PyObject DUMP_UNUSED *dump_callback) {
                     CALL_CSI_HANDLER2(screen_manipulate_title_stack, 22, 0);
                     break;
                 default:
-                    REPORT_ERROR("Unknown CSI t window manipulation sequence with %u parameters and first parameter: %u", num_params, params[0]);
+                    REPORT_ERROR("Unknown CSI t window manipulation sequence with %u parameters and first parameter: %d", num_params, params[0]);
                     break;
             }
             break;
@@ -833,6 +888,23 @@ dispatch_csi(Screen *screen, PyObject DUMP_UNUSED *dump_callback) {
             if (!start_modifier && !end_modifier && !num_params) {
                 REPORT_COMMAND(screen_restore_cursor);
                 screen_restore_cursor(screen);
+                break;
+            }
+            if (!end_modifier && start_modifier == '?') {
+                REPORT_COMMAND(screen_report_key_encoding_flags);
+                screen_report_key_encoding_flags(screen);
+                break;
+            }
+            if (!end_modifier && start_modifier == '=') {
+                CALL_CSI_HANDLER2(screen_set_key_encoding_flags, 0, 1);
+                break;
+            }
+            if (!end_modifier && start_modifier == '>') {
+                CALL_CSI_HANDLER1(screen_push_key_encoding_flags, 0);
+                break;
+            }
+            if (!end_modifier && start_modifier == '<') {
+                CALL_CSI_HANDLER1(screen_pop_key_encoding_flags, 1);
                 break;
             }
             REPORT_ERROR("Unknown CSI u sequence with start and end modifiers: '%c' '%c' and %u parameters", start_modifier, end_modifier, num_params);
@@ -870,8 +942,8 @@ dispatch_csi(Screen *screen, PyObject DUMP_UNUSED *dump_callback) {
             }
             break;
         case 'm':
-            if (start_modifier == '>' && (!end_modifier || end_modifier == ';')) {
-                REPORT_ERROR("Ignoring xterm specific key modifier resource options (CSI > m)");
+            if (start_modifier == '>' && !end_modifier) {
+                CALL_CSI_HANDLER2(screen_xtmodkeys, 0, 0);
                 break;
             }
             /* fallthrough */
@@ -1085,14 +1157,15 @@ accumulate_csi(Screen *screen, uint32_t ch, PyObject DUMP_UNUSED *dump_callback)
     switch(ch) {
         IS_DIGIT
         CSI_SECONDARY
+        case ':':
+        case ';':
             ENSURE_SPACE;
             screen->parser_buf[screen->parser_buf_pos++] = ch;
             break;
         case '?':
         case '>':
-        case '!':
+        case '<':
         case '=':
-        case '-':
             if (screen->parser_buf_pos != 0) {
                 REPORT_ERROR("Invalid character in CSI: 0x%x, ignoring the sequence", ch);
                 SET_STATE(0);

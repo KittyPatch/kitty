@@ -61,7 +61,7 @@ See the :doc:`binary install instructions </binary>`. You can
 You can also use your favorite package manager to install the |kitty| package.
 |kitty| packages are available for:
 `macOS with Homebrew (Cask) <https://formulae.brew.sh/cask/kitty>`_,
-`macOS and Linux with Nix <https://nixos.org/nixos/packages.html?channel=nixpkgs-unstable&query=kitty>`_,
+`macOS and Linux with Nix <https://search.nixos.org/packages?channel=unstable&show=kitty&sort=relevance&query=kitty>`_,
 `Ubuntu <https://launchpad.net/ubuntu/+source/kitty>`_,
 `Debian <https://packages.debian.org/buster/kitty>`_,
 `openSUSE <https://build.opensuse.org/package/show/X11:terminals/kitty>`_,
@@ -214,7 +214,7 @@ Decrease font size                  :sc:`decrease_font_size` (also :kbd:`⌘+-` 
 Restore font size                   :sc:`reset_font_size` (also :kbd:`⌘+0` on macOS)
 Toggle fullscreen                   :sc:`toggle_fullscreen` (also :kbd:`^+⌘+f` on macOS)
 Toggle maximized                    :sc:`toggle_maximized`
-Input unicode character             :sc:`input_unicode_character`
+Input unicode character             :sc:`input_unicode_character` (also :kbd:`^+⌘+space` on macOS)
 Click URL using the keyboard        :sc:`open_url`
 Reset the terminal                  :sc:`reset_terminal`
 Pass current selection to program   :sc:`pass_selection_to_program`
@@ -278,12 +278,29 @@ Some prominent kittens:
 
 :doc:`Hints <kittens/hints>`
     Select and open/paste/insert arbitrary text snippets such as URLs,
-    filenames, words, lines, etc from the terminal screen.
+    filenames, words, lines, etc. from the terminal screen.
+
+
+:doc:`Remote file <kittens/remote_file>`
+    Edit, open, or download remote files over SSH easily, by simply clicking on
+    the filename.
+
+
+:doc:`Hyperlinked grep <kittens/hyperlinked_grep>`
+    Search your files using `ripgrep <https://github.com/BurntSushi/ripgrep>`_
+    and open the results directly in your favorite editor in the terminal,
+    at the line containing the search result, simply by clicking on the result you want.
+
+
+:doc:`Broadcast <kittens/broadcast>`
+    Type in one kitty window and have it broadcast to all (or a subset) of
+    other kitty windows.
 
 
 :doc:`Panel <kittens/panel>`
     Draw a GPU accelerated dock panel on your desktop showing the output
     from an arbitrary terminal program.
+
 
 :doc:`Clipboard <kittens/clipboard>`
     Copy/paste to the clipboard from shell scripts, even over SSH.
@@ -328,7 +345,7 @@ For example:
     launch zsh
     # Create a window with some environment variables set and run
     # vim in it
-    launch env FOO=BAR vim
+    launch --env FOO=BAR vim
     # Set the title for the next window
     title Chat with x
     launch irssi --profile x
@@ -355,14 +372,9 @@ For example:
     focus
     launch emacs
 
-    # Add a watcher that will be called with various events that occur
-    # on all subsequent windows. See the documentation of the launch command
-    # for details on watchers.
-    watcher /some/python/file.py
-    launch mpd
-    launch irssi
-    # Remove the watcher for further windows
-    watcher clear
+.. note::
+    The :doc:`launch <launch>` command when used in a session file
+    cannot create new OS windows, or tabs.
 
 
 Mouse features
@@ -415,6 +427,10 @@ arbitrary, command running in a new window, tab or overlay, for example::
 
 Would open the scrollback buffer in a new window when you press the :kbd:`F1`
 key. See :sc:`show_scrollback` for details.
+
+If you want to use it with an editor such as vim to get more powerful features,
+you can see tips for doing so, in
+`this thread <https://github.com/kovidgoyal/kitty/issues/719>`_.
 
 If you wish to store very large amounts of scrollback to view using the piping or
 :sc:`show_scrollback` features, you can use the :opt:`scrollback_pager_history_size`

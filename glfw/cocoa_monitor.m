@@ -89,7 +89,7 @@ static char* getDisplayName(CGDirectDisplayID displayID)
     if (!service)
     {
         _glfwInputError(GLFW_PLATFORM_ERROR,
-                        "Cocoa: Failed to find service port for display");
+                        "Cocoa: Failed to find service port for display, cannot get its name, using Unknown");
         return NULL;
     }
 
@@ -326,7 +326,7 @@ static CVReturn displayLinkCallback(
         const CVTimeStamp* now UNUSED, const CVTimeStamp* outputTime UNUSED,
         CVOptionFlags flagsIn UNUSED, CVOptionFlags* flagsOut UNUSED, void* userInfo)
 {
-    CGDirectDisplayID displayID = (CGDirectDisplayID)userInfo;
+    CGDirectDisplayID displayID = (uintptr_t)userInfo;
     NSNumber *arg = [NSNumber numberWithUnsignedInt:displayID];
     [NSApp performSelectorOnMainThread:@selector(render_frame_received:) withObject:arg waitUntilDone:NO];
     [arg release];

@@ -20,7 +20,7 @@ def generate_stub():
             'font_features': 'typing.Dict[str, typing.Tuple[str, ...]]'
         },
         preamble_lines=(
-            'from kitty.constants import SingleKey',
+            'from kitty.types import SingleKey',
             'from kitty.config import KeyAction, KeyMap, SequenceMap',
         ),
         extra_fields=(
@@ -34,10 +34,11 @@ def generate_stub():
         all_options,
         class_name='DiffOptions',
         preamble_lines=(
-            'from kitty.conf.utils import KittensKey, KittensKeyAction',
+            'from kitty.conf.utils import KittensKeyAction',
+            'from kitty.types import ParsedShortcut',
         ),
         extra_fields=(
-            ('key_definitions', 'typing.Dict[KittensKey, KittensKeyAction]'),
+            ('key_definitions', 'typing.Dict[ParsedShortcut, KittensKeyAction]'),
         )
     )
 

@@ -14,7 +14,7 @@ typedef enum ScrollTypes { SCROLL_LINE = -999999, SCROLL_PAGE, SCROLL_FULL } Scr
 
 typedef struct {
     bool mLNM, mIRM, mDECTCEM, mDECSCNM, mDECOM, mDECAWM, mDECCOLM, mDECARM, mDECCKM,
-         mBRACKETED_PASTE, mFOCUS_TRACKING, mEXTENDED_KEYBOARD, mDECSACE;
+         mBRACKETED_PASTE, mFOCUS_TRACKING, mDECSACE;
     MouseTrackingMode mouse_tracking_mode;
     MouseTrackingProtocol mouse_tracking_protocol;
     bool eight_bit_controls;  // S8C1T
@@ -129,6 +129,7 @@ typedef struct {
     HYPERLINK_POOL_HANDLE hyperlink_pool;
     ANSIBuf as_ansi_buf;
     char_type last_graphic_char;
+    uint8_t main_key_encoding_flags[8], alt_key_encoding_flags[8], *key_encoding_flags;
 } Screen;
 
 
@@ -192,11 +193,12 @@ void set_icon(Screen *self, PyObject*);
 void set_dynamic_color(Screen *self, unsigned int code, PyObject*);
 void clipboard_control(Screen *self, PyObject*);
 void set_color_table_color(Screen *self, unsigned int code, PyObject*);
+void process_cwd_notification(Screen *self, unsigned int code, PyObject*);
 uint32_t* translation_table(uint32_t which);
 void screen_request_capabilities(Screen *, char, PyObject *);
 void screen_set_8bit_controls(Screen *, bool);
 void report_device_attributes(Screen *self, unsigned int UNUSED mode, char start_modifier);
-void select_graphic_rendition(Screen *self, unsigned int *params, unsigned int count, Region*);
+void select_graphic_rendition(Screen *self, int *params, unsigned int count, Region*);
 void report_device_status(Screen *self, unsigned int which, bool UNUSED);
 void report_mode_status(Screen *self, unsigned int which, bool);
 void screen_apply_selection(Screen *self, void *address, size_t size);
@@ -222,9 +224,16 @@ void screen_rescale_images(Screen *self);
 void screen_report_size(Screen *, unsigned int which);
 void screen_manipulate_title_stack(Screen *, unsigned int op, unsigned int which);
 void screen_draw_overlay_text(Screen *self, const char *utf8_text);
+void screen_set_key_encoding_flags(Screen *self, uint32_t val, uint32_t how);
+void screen_push_key_encoding_flags(Screen *self, uint32_t val);
+void screen_pop_key_encoding_flags(Screen *self, uint32_t num);
+uint8_t screen_current_key_encoding_flags(Screen *self);
+void screen_report_key_encoding_flags(Screen *self);
+void screen_xtmodkeys(Screen *self, uint32_t p1, uint32_t p2);
 #define DECLARE_CH_SCREEN_HANDLER(name) void screen_##name(Screen *screen);
 DECLARE_CH_SCREEN_HANDLER(bell)
 DECLARE_CH_SCREEN_HANDLER(backspace)
 DECLARE_CH_SCREEN_HANDLER(tab)
 DECLARE_CH_SCREEN_HANDLER(linefeed)
 DECLARE_CH_SCREEN_HANDLER(carriage_return)
+#undef DECLARE_CH_SCREEN_HANDLER

@@ -7,6 +7,7 @@
 #include "state.h"
 #include "fonts.h"
 #include "monotonic.h"
+#include "charsets.h"
 #include <structmember.h>
 #include "glfw-wrapper.h"
 extern bool cocoa_make_window_resizable(void *w, bool);
@@ -32,7 +33,12 @@ request_tick_callback(void) {
     glfwPostEmptyEvent();
 }
 
-static int min_width = 100, min_height = 100;
+static inline void
+min_size_for_os_window(OSWindow *window, int *min_width, int *min_height) {
+    *min_width = MAX(8u, window->fonts_data->cell_width + 1);
+    *min_height = MAX(8u, window->fonts_data->cell_height + 1);
+}
+
 
 void
 update_os_window_viewport(OSWindow *window, bool notify_boss) {
@@ -45,7 +51,8 @@ update_os_window_viewport(OSWindow *window, bool notify_boss) {
     if (fw == window->viewport_width && fh == window->viewport_height && w == window->window_width && h == window->window_height && xdpi == window->logical_dpi_x && ydpi == window->logical_dpi_y) {
         return; // no change, ignore
     }
-    if (w <= 0 || h <= 0 || fw / w > 5 || fh / h > 5 || fw < min_width || fh < min_height || fw < w || fh < h) {
+    int min_width, min_height; min_size_for_os_window(window, &min_width, &min_height);
+    if (w <= 0 || h <= 0 || fw < min_width || fh < min_height || fw < w || fh < h) {
         log_error("Invalid geometry ignored: framebuffer: %dx%d window: %dx%d\n", fw, fh, w, h);
         if (!window->viewport_updated_at_least_once) {
             window->viewport_width = min_width; window->viewport_height = min_height;
@@ -159,15 +166,17 @@ window_close_callback(GLFWwindow* window) {
 }
 
 static void
-window_occlusion_callback(GLFWwindow *window, bool occluded UNUSED) {
+window_occlusion_callback(GLFWwindow *window, bool occluded) {
     if (!set_callback_window(window)) return;
+    if (!occluded) global_state.check_for_active_animated_images = true;
     request_tick_callback();
     global_state.callback_os_window = NULL;
 }
 
 static void
-window_iconify_callback(GLFWwindow *window, int iconified UNUSED) {
+window_iconify_callback(GLFWwindow *window, int iconified) {
     if (!set_callback_window(window)) return;
+    if (!iconified) global_state.check_for_active_animated_images = true;
     request_tick_callback();
     global_state.callback_os_window = NULL;
 }
@@ -188,6 +197,7 @@ live_resize_callback(GLFWwindow *w, bool started) {
 static void
 framebuffer_size_callback(GLFWwindow *w, int width, int height) {
     if (!set_callback_window(w)) return;
+    int min_width, min_height; min_size_for_os_window(global_state.callback_os_window, &min_width, &min_height);
     if (width >= min_width && height >= min_height) {
         OSWindow *window = global_state.callback_os_window;
         global_state.has_pending_resizes = true;
@@ -225,19 +235,19 @@ refresh_callback(GLFWwindow *w) {
 static int mods_at_last_key_or_button_event = 0;
 
 static inline int
-key_to_modifier(int key) {
+key_to_modifier(uint32_t key) {
     switch(key) {
-        case GLFW_KEY_LEFT_SHIFT:
-        case GLFW_KEY_RIGHT_SHIFT:
+        case GLFW_FKEY_LEFT_SHIFT:
+        case GLFW_FKEY_RIGHT_SHIFT:
             return GLFW_MOD_SHIFT;
-        case GLFW_KEY_LEFT_CONTROL:
-        case GLFW_KEY_RIGHT_CONTROL:
+        case GLFW_FKEY_LEFT_CONTROL:
+        case GLFW_FKEY_RIGHT_CONTROL:
             return GLFW_MOD_CONTROL;
-        case GLFW_KEY_LEFT_ALT:
-        case GLFW_KEY_RIGHT_ALT:
+        case GLFW_FKEY_LEFT_ALT:
+        case GLFW_FKEY_RIGHT_ALT:
             return GLFW_MOD_ALT;
-        case GLFW_KEY_LEFT_SUPER:
-        case GLFW_KEY_RIGHT_SUPER:
+        case GLFW_FKEY_LEFT_SUPER:
+        case GLFW_FKEY_RIGHT_SUPER:
             return GLFW_MOD_SUPER;
         default:
             return -1;
@@ -326,6 +336,7 @@ window_focus_callback(GLFWwindow *w, int focused) {
         show_mouse_cursor(w);
         focus_in_event();
         global_state.callback_os_window->last_focused_counter = ++focus_counter;
+        global_state.check_for_active_animated_images = true;
     }
     monotonic_t now = monotonic();
     global_state.callback_os_window->last_mouse_activity_at = now;
@@ -368,6 +379,14 @@ application_close_requested_callback(int flags) {
         }
     }
 }
+
+#ifdef __APPLE__
+static bool
+apple_file_open_callback(const char* filepath) {
+    set_cocoa_pending_action(OPEN_FILE, filepath);
+    return true;
+}
+#endif
 // }}}
 
 void
@@ -392,12 +411,15 @@ static GLFWimage logo = {0};
 
 static PyObject*
 set_default_window_icon(PyObject UNUSED *self, PyObject *args) {
-    Py_ssize_t sz;
-    const char *logo_data;
-    if(!PyArg_ParseTuple(args, "s#ii", &(logo_data), &sz, &(logo.width), &(logo.height))) return NULL;
-    sz = (MAX(logo.width * logo.height, sz));
-    logo.pixels = malloc(sz);
-    if (logo.pixels) memcpy(logo.pixels, logo_data, sz);
+    size_t sz;
+    unsigned int width, height;
+    const char *path;
+    uint8_t *data;
+    if(!PyArg_ParseTuple(args, "s", &path)) return NULL;
+    if (png_path_to_bitmap(path, &data, &width, &height, &sz)) {
+        logo.width = width; logo.height = height;
+        logo.pixels = data;
+    }
     Py_RETURN_NONE;
 }
 
@@ -579,7 +601,7 @@ create_os_window(PyObject UNUSED *self, PyObject *args) {
     GLFWwindow *temp_window = NULL;
 #ifdef __APPLE__
     if (!apple_preserve_common_context) {
-        apple_preserve_common_context = glfwCreateWindow(100, 200, "kitty", NULL, common_context);
+        apple_preserve_common_context = glfwCreateWindow(640, 480, "kitty", NULL, common_context);
     }
     if (!common_context) common_context = apple_preserve_common_context;
 #endif
@@ -624,6 +646,16 @@ create_os_window(PyObject UNUSED *self, PyObject *args) {
         Py_DECREF(pret);
         if (x != -1 && y != -1) glfwSetWindowPos(glfw_window, x, y);
         glfwShowWindow(glfw_window);
+#ifdef __APPLE__
+        float n_xscale, n_yscale;
+        double n_xdpi, n_ydpi;
+        get_window_content_scale(glfw_window, &n_xscale, &n_yscale, &n_xdpi, &n_ydpi);
+        if (n_xdpi != xdpi || n_ydpi != ydpi) {
+            // this can happen if the window is moved by the OS to a different monitor when shown
+            xdpi = n_xdpi; ydpi = n_ydpi;
+            fonts_data = load_fonts_data(global_state.font_sz_in_pts, xdpi, ydpi);
+        }
+#endif
     }
     if (is_first_window) {
         PyObject *ret = PyObject_CallFunction(load_programs, "O", is_semi_transparent ? Py_True : Py_False);
@@ -820,6 +852,9 @@ glfw_init(PyObject UNUSED *self, PyObject *args) {
 #endif
     PyObject *ans = glfwInit(monotonic_start_time) ? Py_True: Py_False;
     if (ans == Py_True) {
+#ifdef __APPLE__
+        glfwSetCocoaFileOpenCallback(apple_file_open_callback);
+#endif
         OSWindow w = {0};
         set_os_window_dpi(&w);
         global_state.default_dpi.x = w.logical_dpi_x;
@@ -858,8 +893,125 @@ static PyObject*
 glfw_get_key_name(PyObject UNUSED *self, PyObject *args) {
     int key, native_key;
     if (!PyArg_ParseTuple(args, "ii", &key, &native_key)) return NULL;
+    if (key) {
+        switch (key) {
+            /* start glfw functional key names (auto generated by gen-key-constants.py do not edit) */
+            case GLFW_FKEY_ESCAPE: return PyUnicode_FromString("escape");
+            case GLFW_FKEY_ENTER: return PyUnicode_FromString("enter");
+            case GLFW_FKEY_TAB: return PyUnicode_FromString("tab");
+            case GLFW_FKEY_BACKSPACE: return PyUnicode_FromString("backspace");
+            case GLFW_FKEY_INSERT: return PyUnicode_FromString("insert");
+            case GLFW_FKEY_DELETE: return PyUnicode_FromString("delete");
+            case GLFW_FKEY_LEFT: return PyUnicode_FromString("left");
+            case GLFW_FKEY_RIGHT: return PyUnicode_FromString("right");
+            case GLFW_FKEY_UP: return PyUnicode_FromString("up");
+            case GLFW_FKEY_DOWN: return PyUnicode_FromString("down");
+            case GLFW_FKEY_PAGE_UP: return PyUnicode_FromString("page_up");
+            case GLFW_FKEY_PAGE_DOWN: return PyUnicode_FromString("page_down");
+            case GLFW_FKEY_HOME: return PyUnicode_FromString("home");
+            case GLFW_FKEY_END: return PyUnicode_FromString("end");
+            case GLFW_FKEY_CAPS_LOCK: return PyUnicode_FromString("caps_lock");
+            case GLFW_FKEY_SCROLL_LOCK: return PyUnicode_FromString("scroll_lock");
+            case GLFW_FKEY_NUM_LOCK: return PyUnicode_FromString("num_lock");
+            case GLFW_FKEY_PRINT_SCREEN: return PyUnicode_FromString("print_screen");
+            case GLFW_FKEY_PAUSE: return PyUnicode_FromString("pause");
+            case GLFW_FKEY_MENU: return PyUnicode_FromString("menu");
+            case GLFW_FKEY_F1: return PyUnicode_FromString("f1");
+            case GLFW_FKEY_F2: return PyUnicode_FromString("f2");
+            case GLFW_FKEY_F3: return PyUnicode_FromString("f3");
+            case GLFW_FKEY_F4: return PyUnicode_FromString("f4");
+            case GLFW_FKEY_F5: return PyUnicode_FromString("f5");
+            case GLFW_FKEY_F6: return PyUnicode_FromString("f6");
+            case GLFW_FKEY_F7: return PyUnicode_FromString("f7");
+            case GLFW_FKEY_F8: return PyUnicode_FromString("f8");
+            case GLFW_FKEY_F9: return PyUnicode_FromString("f9");
+            case GLFW_FKEY_F10: return PyUnicode_FromString("f10");
+            case GLFW_FKEY_F11: return PyUnicode_FromString("f11");
+            case GLFW_FKEY_F12: return PyUnicode_FromString("f12");
+            case GLFW_FKEY_F13: return PyUnicode_FromString("f13");
+            case GLFW_FKEY_F14: return PyUnicode_FromString("f14");
+            case GLFW_FKEY_F15: return PyUnicode_FromString("f15");
+            case GLFW_FKEY_F16: return PyUnicode_FromString("f16");
+            case GLFW_FKEY_F17: return PyUnicode_FromString("f17");
+            case GLFW_FKEY_F18: return PyUnicode_FromString("f18");
+            case GLFW_FKEY_F19: return PyUnicode_FromString("f19");
+            case GLFW_FKEY_F20: return PyUnicode_FromString("f20");
+            case GLFW_FKEY_F21: return PyUnicode_FromString("f21");
+            case GLFW_FKEY_F22: return PyUnicode_FromString("f22");
+            case GLFW_FKEY_F23: return PyUnicode_FromString("f23");
+            case GLFW_FKEY_F24: return PyUnicode_FromString("f24");
+            case GLFW_FKEY_F25: return PyUnicode_FromString("f25");
+            case GLFW_FKEY_F26: return PyUnicode_FromString("f26");
+            case GLFW_FKEY_F27: return PyUnicode_FromString("f27");
+            case GLFW_FKEY_F28: return PyUnicode_FromString("f28");
+            case GLFW_FKEY_F29: return PyUnicode_FromString("f29");
+            case GLFW_FKEY_F30: return PyUnicode_FromString("f30");
+            case GLFW_FKEY_F31: return PyUnicode_FromString("f31");
+            case GLFW_FKEY_F32: return PyUnicode_FromString("f32");
+            case GLFW_FKEY_F33: return PyUnicode_FromString("f33");
+            case GLFW_FKEY_F34: return PyUnicode_FromString("f34");
+            case GLFW_FKEY_F35: return PyUnicode_FromString("f35");
+            case GLFW_FKEY_KP_0: return PyUnicode_FromString("kp_0");
+            case GLFW_FKEY_KP_1: return PyUnicode_FromString("kp_1");
+            case GLFW_FKEY_KP_2: return PyUnicode_FromString("kp_2");
+            case GLFW_FKEY_KP_3: return PyUnicode_FromString("kp_3");
+            case GLFW_FKEY_KP_4: return PyUnicode_FromString("kp_4");
+            case GLFW_FKEY_KP_5: return PyUnicode_FromString("kp_5");
+            case GLFW_FKEY_KP_6: return PyUnicode_FromString("kp_6");
+            case GLFW_FKEY_KP_7: return PyUnicode_FromString("kp_7");
+            case GLFW_FKEY_KP_8: return PyUnicode_FromString("kp_8");
+            case GLFW_FKEY_KP_9: return PyUnicode_FromString("kp_9");
+            case GLFW_FKEY_KP_DECIMAL: return PyUnicode_FromString("kp_decimal");
+            case GLFW_FKEY_KP_DIVIDE: return PyUnicode_FromString("kp_divide");
+            case GLFW_FKEY_KP_MULTIPLY: return PyUnicode_FromString("kp_multiply");
+            case GLFW_FKEY_KP_SUBTRACT: return PyUnicode_FromString("kp_subtract");
+            case GLFW_FKEY_KP_ADD: return PyUnicode_FromString("kp_add");
+            case GLFW_FKEY_KP_ENTER: return PyUnicode_FromString("kp_enter");
+            case GLFW_FKEY_KP_EQUAL: return PyUnicode_FromString("kp_equal");
+            case GLFW_FKEY_KP_SEPARATOR: return PyUnicode_FromString("kp_separator");
+            case GLFW_FKEY_KP_LEFT: return PyUnicode_FromString("kp_left");
+            case GLFW_FKEY_KP_RIGHT: return PyUnicode_FromString("kp_right");
+            case GLFW_FKEY_KP_UP: return PyUnicode_FromString("kp_up");
+            case GLFW_FKEY_KP_DOWN: return PyUnicode_FromString("kp_down");
+            case GLFW_FKEY_KP_PAGE_UP: return PyUnicode_FromString("kp_page_up");
+            case GLFW_FKEY_KP_PAGE_DOWN: return PyUnicode_FromString("kp_page_down");
+            case GLFW_FKEY_KP_HOME: return PyUnicode_FromString("kp_home");
+            case GLFW_FKEY_KP_END: return PyUnicode_FromString("kp_end");
+            case GLFW_FKEY_KP_INSERT: return PyUnicode_FromString("kp_insert");
+            case GLFW_FKEY_KP_DELETE: return PyUnicode_FromString("kp_delete");
+            case GLFW_FKEY_MEDIA_PLAY: return PyUnicode_FromString("media_play");
+            case GLFW_FKEY_MEDIA_PAUSE: return PyUnicode_FromString("media_pause");
+            case GLFW_FKEY_MEDIA_PLAY_PAUSE: return PyUnicode_FromString("media_play_pause");
+            case GLFW_FKEY_MEDIA_REVERSE: return PyUnicode_FromString("media_reverse");
+            case GLFW_FKEY_MEDIA_STOP: return PyUnicode_FromString("media_stop");
+            case GLFW_FKEY_MEDIA_FAST_FORWARD: return PyUnicode_FromString("media_fast_forward");
+            case GLFW_FKEY_MEDIA_REWIND: return PyUnicode_FromString("media_rewind");
+            case GLFW_FKEY_MEDIA_TRACK_NEXT: return PyUnicode_FromString("media_track_next");
+            case GLFW_FKEY_MEDIA_TRACK_PREVIOUS: return PyUnicode_FromString("media_track_previous");
+            case GLFW_FKEY_MEDIA_RECORD: return PyUnicode_FromString("media_record");
+            case GLFW_FKEY_LOWER_VOLUME: return PyUnicode_FromString("lower_volume");
+            case GLFW_FKEY_RAISE_VOLUME: return PyUnicode_FromString("raise_volume");
+            case GLFW_FKEY_MUTE_VOLUME: return PyUnicode_FromString("mute_volume");
+            case GLFW_FKEY_LEFT_SHIFT: return PyUnicode_FromString("left_shift");
+            case GLFW_FKEY_LEFT_CONTROL: return PyUnicode_FromString("left_control");
+            case GLFW_FKEY_LEFT_ALT: return PyUnicode_FromString("left_alt");
+            case GLFW_FKEY_LEFT_SUPER: return PyUnicode_FromString("left_super");
+            case GLFW_FKEY_LEFT_HYPER: return PyUnicode_FromString("left_hyper");
+            case GLFW_FKEY_RIGHT_SHIFT: return PyUnicode_FromString("right_shift");
+            case GLFW_FKEY_RIGHT_CONTROL: return PyUnicode_FromString("right_control");
+            case GLFW_FKEY_RIGHT_ALT: return PyUnicode_FromString("right_alt");
+            case GLFW_FKEY_RIGHT_SUPER: return PyUnicode_FromString("right_super");
+            case GLFW_FKEY_RIGHT_HYPER: return PyUnicode_FromString("right_hyper");
+            case GLFW_FKEY_ISO_LEVEL3_SHIFT: return PyUnicode_FromString("iso_level3_shift");
+            case GLFW_FKEY_ISO_LEVEL5_SHIFT: return PyUnicode_FromString("iso_level5_shift");
+/* end glfw functional key names */
+        }
+        char buf[8] = {0};
+        encode_utf8(key, buf);
+        return PyUnicode_FromString(buf);
+    }
     if (!glfwGetKeyName) {
-        return PyUnicode_FromFormat("key: %d native_key: %d", key, native_key);
+        return PyUnicode_FromFormat("0x%x", native_key);
     }
     return Py_BuildValue("z", glfwGetKeyName(key, native_key));
 }
@@ -1069,12 +1221,6 @@ set_primary_selection(PyObject UNUSED *self, PyObject *args) {
 }
 
 static PyObject*
-set_smallest_allowed_resize(PyObject *self UNUSED, PyObject *args) {
-    if (!PyArg_ParseTuple(args, "ii", &min_width, &min_height)) return NULL;
-    Py_RETURN_NONE;
-}
-
-static PyObject*
 set_custom_cursor(PyObject *self UNUSED, PyObject *args) {
     int shape;
     int x=0, y=0;
@@ -1109,8 +1255,10 @@ set_custom_cursor(PyObject *self UNUSED, PyObject *args) {
 
 #ifdef __APPLE__
 void
-get_cocoa_key_equivalent(int key, int mods, char *cocoa_key, size_t key_sz, int *cocoa_mods) {
-    glfwGetCocoaKeyEquivalent(key, mods, cocoa_key, key_sz, cocoa_mods);
+get_cocoa_key_equivalent(uint32_t key, int mods, char *cocoa_key, size_t key_sz, int *cocoa_mods) {
+    memset(cocoa_key, 0, key_sz);
+    uint32_t ans = glfwGetCocoaKeyEquivalent(key, mods, cocoa_mods);
+    if (ans) encode_utf8(ans, cocoa_key);
 }
 
 static void
@@ -1209,7 +1357,6 @@ stop_main_loop(void) {
 
 static PyMethodDef module_methods[] = {
     METHODB(set_custom_cursor, METH_VARARGS),
-    METHODB(set_smallest_allowed_resize, METH_VARARGS),
     METHODB(create_os_window, METH_VARARGS),
     METHODB(set_default_window_icon, METH_VARARGS),
     METHODB(get_clipboard_string, METH_NOARGS),
@@ -1257,201 +1404,116 @@ init_glfw(PyObject *m) {
     ADDC(true); ADDC(false);
     ADDC(GLFW_IBEAM_CURSOR); ADDC(GLFW_HAND_CURSOR); ADDC(GLFW_ARROW_CURSOR);
 
-// --- Keys --------------------------------------------------------------------
-
-// --- The unknown key ---------------------------------------------------------
-    ADDC(GLFW_KEY_UNKNOWN);
-
-// --- Printable keys ----------------------------------------------------------
-    ADDC(GLFW_KEY_SPACE);
-    ADDC(GLFW_KEY_EXCLAM);
-    ADDC(GLFW_KEY_DOUBLE_QUOTE);
-    ADDC(GLFW_KEY_NUMBER_SIGN);
-    ADDC(GLFW_KEY_DOLLAR);
-    ADDC(GLFW_KEY_AMPERSAND);
-    ADDC(GLFW_KEY_APOSTROPHE);
-    ADDC(GLFW_KEY_PARENTHESIS_LEFT);
-    ADDC(GLFW_KEY_PARENTHESIS_RIGHT);
-    ADDC(GLFW_KEY_PLUS);
-    ADDC(GLFW_KEY_COMMA);
-    ADDC(GLFW_KEY_MINUS);
-    ADDC(GLFW_KEY_PERIOD);
-    ADDC(GLFW_KEY_SLASH);
-    ADDC(GLFW_KEY_0);
-    ADDC(GLFW_KEY_1);
-    ADDC(GLFW_KEY_2);
-    ADDC(GLFW_KEY_3);
-    ADDC(GLFW_KEY_4);
-    ADDC(GLFW_KEY_5);
-    ADDC(GLFW_KEY_6);
-    ADDC(GLFW_KEY_7);
-    ADDC(GLFW_KEY_8);
-    ADDC(GLFW_KEY_9);
-    ADDC(GLFW_KEY_COLON);
-    ADDC(GLFW_KEY_SEMICOLON);
-    ADDC(GLFW_KEY_LESS);
-    ADDC(GLFW_KEY_EQUAL);
-    ADDC(GLFW_KEY_GREATER);
-    ADDC(GLFW_KEY_AT);
-    ADDC(GLFW_KEY_A);
-    ADDC(GLFW_KEY_B);
-    ADDC(GLFW_KEY_C);
-    ADDC(GLFW_KEY_D);
-    ADDC(GLFW_KEY_E);
-    ADDC(GLFW_KEY_F);
-    ADDC(GLFW_KEY_G);
-    ADDC(GLFW_KEY_H);
-    ADDC(GLFW_KEY_I);
-    ADDC(GLFW_KEY_J);
-    ADDC(GLFW_KEY_K);
-    ADDC(GLFW_KEY_L);
-    ADDC(GLFW_KEY_M);
-    ADDC(GLFW_KEY_N);
-    ADDC(GLFW_KEY_O);
-    ADDC(GLFW_KEY_P);
-    ADDC(GLFW_KEY_Q);
-    ADDC(GLFW_KEY_R);
-    ADDC(GLFW_KEY_S);
-    ADDC(GLFW_KEY_T);
-    ADDC(GLFW_KEY_U);
-    ADDC(GLFW_KEY_V);
-    ADDC(GLFW_KEY_W);
-    ADDC(GLFW_KEY_X);
-    ADDC(GLFW_KEY_Y);
-    ADDC(GLFW_KEY_Z);
-    ADDC(GLFW_KEY_LEFT_BRACKET);
-    ADDC(GLFW_KEY_BACKSLASH);
-    ADDC(GLFW_KEY_RIGHT_BRACKET);
-    ADDC(GLFW_KEY_CIRCUMFLEX);
-    ADDC(GLFW_KEY_UNDERSCORE);
-    ADDC(GLFW_KEY_GRAVE_ACCENT);
-    ADDC(GLFW_KEY_WORLD_1);
-    ADDC(GLFW_KEY_WORLD_2);
-    ADDC(GLFW_KEY_PARAGRAPH);
-    ADDC(GLFW_KEY_MASCULINE);
-    ADDC(GLFW_KEY_A_GRAVE);
-    ADDC(GLFW_KEY_A_DIAERESIS);
-    ADDC(GLFW_KEY_A_RING);
-    ADDC(GLFW_KEY_AE);
-    ADDC(GLFW_KEY_C_CEDILLA);
-    ADDC(GLFW_KEY_E_GRAVE);
-    ADDC(GLFW_KEY_E_ACUTE);
-    ADDC(GLFW_KEY_I_GRAVE);
-    ADDC(GLFW_KEY_N_TILDE);
-    ADDC(GLFW_KEY_O_GRAVE);
-    ADDC(GLFW_KEY_O_DIAERESIS);
-    ADDC(GLFW_KEY_O_SLASH);
-    ADDC(GLFW_KEY_U_GRAVE);
-    ADDC(GLFW_KEY_U_DIAERESIS);
-    ADDC(GLFW_KEY_S_SHARP);
-    ADDC(GLFW_KEY_CYRILLIC_A);
-    ADDC(GLFW_KEY_CYRILLIC_BE);
-    ADDC(GLFW_KEY_CYRILLIC_VE);
-    ADDC(GLFW_KEY_CYRILLIC_GHE);
-    ADDC(GLFW_KEY_CYRILLIC_DE);
-    ADDC(GLFW_KEY_CYRILLIC_IE);
-    ADDC(GLFW_KEY_CYRILLIC_ZHE);
-    ADDC(GLFW_KEY_CYRILLIC_ZE);
-    ADDC(GLFW_KEY_CYRILLIC_I);
-    ADDC(GLFW_KEY_CYRILLIC_SHORT_I);
-    ADDC(GLFW_KEY_CYRILLIC_KA);
-    ADDC(GLFW_KEY_CYRILLIC_EL);
-    ADDC(GLFW_KEY_CYRILLIC_EM);
-    ADDC(GLFW_KEY_CYRILLIC_EN);
-    ADDC(GLFW_KEY_CYRILLIC_O);
-    ADDC(GLFW_KEY_CYRILLIC_PE);
-    ADDC(GLFW_KEY_CYRILLIC_ER);
-    ADDC(GLFW_KEY_CYRILLIC_ES);
-    ADDC(GLFW_KEY_CYRILLIC_TE);
-    ADDC(GLFW_KEY_CYRILLIC_U);
-    ADDC(GLFW_KEY_CYRILLIC_EF);
-    ADDC(GLFW_KEY_CYRILLIC_HA);
-    ADDC(GLFW_KEY_CYRILLIC_TSE);
-    ADDC(GLFW_KEY_CYRILLIC_CHE);
-    ADDC(GLFW_KEY_CYRILLIC_SHA);
-    ADDC(GLFW_KEY_CYRILLIC_SHCHA);
-    ADDC(GLFW_KEY_CYRILLIC_HARD_SIGN);
-    ADDC(GLFW_KEY_CYRILLIC_YERU);
-    ADDC(GLFW_KEY_CYRILLIC_SOFT_SIGN);
-    ADDC(GLFW_KEY_CYRILLIC_E);
-    ADDC(GLFW_KEY_CYRILLIC_YU);
-    ADDC(GLFW_KEY_CYRILLIC_YA);
-    ADDC(GLFW_KEY_CYRILLIC_IO);
-    ADDC(GLFW_KEY_LAST_PRINTABLE);
-
-// --- Function keys -----------------------------------------------------------
-    ADDC(GLFW_KEY_ESCAPE);
-    ADDC(GLFW_KEY_ENTER);
-    ADDC(GLFW_KEY_TAB);
-    ADDC(GLFW_KEY_BACKSPACE);
-    ADDC(GLFW_KEY_INSERT);
-    ADDC(GLFW_KEY_DELETE);
-    ADDC(GLFW_KEY_RIGHT);
-    ADDC(GLFW_KEY_LEFT);
-    ADDC(GLFW_KEY_DOWN);
-    ADDC(GLFW_KEY_UP);
-    ADDC(GLFW_KEY_PAGE_UP);
-    ADDC(GLFW_KEY_PAGE_DOWN);
-    ADDC(GLFW_KEY_HOME);
-    ADDC(GLFW_KEY_END);
-    ADDC(GLFW_KEY_CAPS_LOCK);
-    ADDC(GLFW_KEY_SCROLL_LOCK);
-    ADDC(GLFW_KEY_NUM_LOCK);
-    ADDC(GLFW_KEY_PRINT_SCREEN);
-    ADDC(GLFW_KEY_PAUSE);
-    ADDC(GLFW_KEY_F1);
-    ADDC(GLFW_KEY_F2);
-    ADDC(GLFW_KEY_F3);
-    ADDC(GLFW_KEY_F4);
-    ADDC(GLFW_KEY_F5);
-    ADDC(GLFW_KEY_F6);
-    ADDC(GLFW_KEY_F7);
-    ADDC(GLFW_KEY_F8);
-    ADDC(GLFW_KEY_F9);
-    ADDC(GLFW_KEY_F10);
-    ADDC(GLFW_KEY_F11);
-    ADDC(GLFW_KEY_F12);
-    ADDC(GLFW_KEY_F13);
-    ADDC(GLFW_KEY_F14);
-    ADDC(GLFW_KEY_F15);
-    ADDC(GLFW_KEY_F16);
-    ADDC(GLFW_KEY_F17);
-    ADDC(GLFW_KEY_F18);
-    ADDC(GLFW_KEY_F19);
-    ADDC(GLFW_KEY_F20);
-    ADDC(GLFW_KEY_F21);
-    ADDC(GLFW_KEY_F22);
-    ADDC(GLFW_KEY_F23);
-    ADDC(GLFW_KEY_F24);
-    ADDC(GLFW_KEY_F25);
-    ADDC(GLFW_KEY_KP_0);
-    ADDC(GLFW_KEY_KP_1);
-    ADDC(GLFW_KEY_KP_2);
-    ADDC(GLFW_KEY_KP_3);
-    ADDC(GLFW_KEY_KP_4);
-    ADDC(GLFW_KEY_KP_5);
-    ADDC(GLFW_KEY_KP_6);
-    ADDC(GLFW_KEY_KP_7);
-    ADDC(GLFW_KEY_KP_8);
-    ADDC(GLFW_KEY_KP_9);
-    ADDC(GLFW_KEY_KP_DECIMAL);
-    ADDC(GLFW_KEY_KP_DIVIDE);
-    ADDC(GLFW_KEY_KP_MULTIPLY);
-    ADDC(GLFW_KEY_KP_SUBTRACT);
-    ADDC(GLFW_KEY_KP_ADD);
-    ADDC(GLFW_KEY_KP_ENTER);
-    ADDC(GLFW_KEY_KP_EQUAL);
-    ADDC(GLFW_KEY_LEFT_SHIFT);
-    ADDC(GLFW_KEY_LEFT_CONTROL);
-    ADDC(GLFW_KEY_LEFT_ALT);
-    ADDC(GLFW_KEY_LEFT_SUPER);
-    ADDC(GLFW_KEY_RIGHT_SHIFT);
-    ADDC(GLFW_KEY_RIGHT_CONTROL);
-    ADDC(GLFW_KEY_RIGHT_ALT);
-    ADDC(GLFW_KEY_RIGHT_SUPER);
-    ADDC(GLFW_KEY_MENU);
-    ADDC(GLFW_KEY_LAST);
-
+    /* start glfw functional keys (auto generated by gen-key-constants.py do not edit) */
+    ADDC(GLFW_FKEY_ESCAPE);
+    ADDC(GLFW_FKEY_ENTER);
+    ADDC(GLFW_FKEY_TAB);
+    ADDC(GLFW_FKEY_BACKSPACE);
+    ADDC(GLFW_FKEY_INSERT);
+    ADDC(GLFW_FKEY_DELETE);
+    ADDC(GLFW_FKEY_LEFT);
+    ADDC(GLFW_FKEY_RIGHT);
+    ADDC(GLFW_FKEY_UP);
+    ADDC(GLFW_FKEY_DOWN);
+    ADDC(GLFW_FKEY_PAGE_UP);
+    ADDC(GLFW_FKEY_PAGE_DOWN);
+    ADDC(GLFW_FKEY_HOME);
+    ADDC(GLFW_FKEY_END);
+    ADDC(GLFW_FKEY_CAPS_LOCK);
+    ADDC(GLFW_FKEY_SCROLL_LOCK);
+    ADDC(GLFW_FKEY_NUM_LOCK);
+    ADDC(GLFW_FKEY_PRINT_SCREEN);
+    ADDC(GLFW_FKEY_PAUSE);
+    ADDC(GLFW_FKEY_MENU);
+    ADDC(GLFW_FKEY_F1);
+    ADDC(GLFW_FKEY_F2);
+    ADDC(GLFW_FKEY_F3);
+    ADDC(GLFW_FKEY_F4);
+    ADDC(GLFW_FKEY_F5);
+    ADDC(GLFW_FKEY_F6);
+    ADDC(GLFW_FKEY_F7);
+    ADDC(GLFW_FKEY_F8);
+    ADDC(GLFW_FKEY_F9);
+    ADDC(GLFW_FKEY_F10);
+    ADDC(GLFW_FKEY_F11);
+    ADDC(GLFW_FKEY_F12);
+    ADDC(GLFW_FKEY_F13);
+    ADDC(GLFW_FKEY_F14);
+    ADDC(GLFW_FKEY_F15);
+    ADDC(GLFW_FKEY_F16);
+    ADDC(GLFW_FKEY_F17);
+    ADDC(GLFW_FKEY_F18);
+    ADDC(GLFW_FKEY_F19);
+    ADDC(GLFW_FKEY_F20);
+    ADDC(GLFW_FKEY_F21);
+    ADDC(GLFW_FKEY_F22);
+    ADDC(GLFW_FKEY_F23);
+    ADDC(GLFW_FKEY_F24);
+    ADDC(GLFW_FKEY_F25);
+    ADDC(GLFW_FKEY_F26);
+    ADDC(GLFW_FKEY_F27);
+    ADDC(GLFW_FKEY_F28);
+    ADDC(GLFW_FKEY_F29);
+    ADDC(GLFW_FKEY_F30);
+    ADDC(GLFW_FKEY_F31);
+    ADDC(GLFW_FKEY_F32);
+    ADDC(GLFW_FKEY_F33);
+    ADDC(GLFW_FKEY_F34);
+    ADDC(GLFW_FKEY_F35);
+    ADDC(GLFW_FKEY_KP_0);
+    ADDC(GLFW_FKEY_KP_1);
+    ADDC(GLFW_FKEY_KP_2);
+    ADDC(GLFW_FKEY_KP_3);
+    ADDC(GLFW_FKEY_KP_4);
+    ADDC(GLFW_FKEY_KP_5);
+    ADDC(GLFW_FKEY_KP_6);
+    ADDC(GLFW_FKEY_KP_7);
+    ADDC(GLFW_FKEY_KP_8);
+    ADDC(GLFW_FKEY_KP_9);
+    ADDC(GLFW_FKEY_KP_DECIMAL);
+    ADDC(GLFW_FKEY_KP_DIVIDE);
+    ADDC(GLFW_FKEY_KP_MULTIPLY);
+    ADDC(GLFW_FKEY_KP_SUBTRACT);
+    ADDC(GLFW_FKEY_KP_ADD);
+    ADDC(GLFW_FKEY_KP_ENTER);
+    ADDC(GLFW_FKEY_KP_EQUAL);
+    ADDC(GLFW_FKEY_KP_SEPARATOR);
+    ADDC(GLFW_FKEY_KP_LEFT);
+    ADDC(GLFW_FKEY_KP_RIGHT);
+    ADDC(GLFW_FKEY_KP_UP);
+    ADDC(GLFW_FKEY_KP_DOWN);
+    ADDC(GLFW_FKEY_KP_PAGE_UP);
+    ADDC(GLFW_FKEY_KP_PAGE_DOWN);
+    ADDC(GLFW_FKEY_KP_HOME);
+    ADDC(GLFW_FKEY_KP_END);
+    ADDC(GLFW_FKEY_KP_INSERT);
+    ADDC(GLFW_FKEY_KP_DELETE);
+    ADDC(GLFW_FKEY_MEDIA_PLAY);
+    ADDC(GLFW_FKEY_MEDIA_PAUSE);
+    ADDC(GLFW_FKEY_MEDIA_PLAY_PAUSE);
+    ADDC(GLFW_FKEY_MEDIA_REVERSE);
+    ADDC(GLFW_FKEY_MEDIA_STOP);
+    ADDC(GLFW_FKEY_MEDIA_FAST_FORWARD);
+    ADDC(GLFW_FKEY_MEDIA_REWIND);
+    ADDC(GLFW_FKEY_MEDIA_TRACK_NEXT);
+    ADDC(GLFW_FKEY_MEDIA_TRACK_PREVIOUS);
+    ADDC(GLFW_FKEY_MEDIA_RECORD);
+    ADDC(GLFW_FKEY_LOWER_VOLUME);
+    ADDC(GLFW_FKEY_RAISE_VOLUME);
+    ADDC(GLFW_FKEY_MUTE_VOLUME);
+    ADDC(GLFW_FKEY_LEFT_SHIFT);
+    ADDC(GLFW_FKEY_LEFT_CONTROL);
+    ADDC(GLFW_FKEY_LEFT_ALT);
+    ADDC(GLFW_FKEY_LEFT_SUPER);
+    ADDC(GLFW_FKEY_LEFT_HYPER);
+    ADDC(GLFW_FKEY_RIGHT_SHIFT);
+    ADDC(GLFW_FKEY_RIGHT_CONTROL);
+    ADDC(GLFW_FKEY_RIGHT_ALT);
+    ADDC(GLFW_FKEY_RIGHT_SUPER);
+    ADDC(GLFW_FKEY_RIGHT_HYPER);
+    ADDC(GLFW_FKEY_ISO_LEVEL3_SHIFT);
+    ADDC(GLFW_FKEY_ISO_LEVEL5_SHIFT);
+/* end glfw functional keys */
 // --- Modifiers ---------------------------------------------------------------
     ADDC(GLFW_MOD_SHIFT);
     ADDC(GLFW_MOD_CONTROL);

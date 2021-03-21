@@ -8,6 +8,7 @@ from typing import (
     Any, Callable, ContextManager, Dict, Optional, Sequence, Type, Union
 )
 
+from kitty.types import ParsedShortcut
 from kitty.typing import (
     AbstractEventLoop, BossType, Debug, ImageManagerType, KeyEventType,
     KittensKeyActionType, LoopType, MouseEvent, ScreenSize, TermManagerType
@@ -45,18 +46,18 @@ class Handler:
     def asyncio_loop(self) -> AbstractEventLoop:
         return self._tui_loop.asycio_loop
 
-    def add_shortcut(self, action: KittensKeyActionType, key: str, mods: Optional[int] = None, is_text: Optional[bool] = False) -> None:
-        if not hasattr(self, '_text_shortcuts'):
-            self._text_shortcuts, self._key_shortcuts = {}, {}
-        if is_text:
-            self._text_shortcuts[key] = action
-        else:
-            self._key_shortcuts[(key, mods or 0)] = action
+    def add_shortcut(self, action: KittensKeyActionType, spec: Union[str, ParsedShortcut]) -> None:
+        if not hasattr(self, '_key_shortcuts'):
+            self._key_shortcuts: Dict[ParsedShortcut, KittensKeyActionType] = {}
+        if isinstance(spec, str):
+            from kitty.key_encoding import parse_shortcut
+            spec = parse_shortcut(spec)
+        self._key_shortcuts[spec] = action
 
-    def shortcut_action(self, key_event_or_text: Union[str, KeyEventType]) -> Optional[KittensKeyActionType]:
-        if isinstance(key_event_or_text, str):
-            return self._text_shortcuts.get(key_event_or_text)
-        return self._key_shortcuts.get((key_event_or_text.key, key_event_or_text.mods))
+    def shortcut_action(self, key_event: KeyEventType) -> Optional[KittensKeyActionType]:
+        for sc, action in self._key_shortcuts.items():
+            if key_event.matches(sc):
+                return action
 
     def __enter__(self) -> None:
         if self._image_manager is not None:
@@ -84,6 +85,12 @@ class Handler:
 
     def on_term(self) -> None:
         self._tui_loop.quit(1)
+
+    def on_key_event(self, key_event: KeyEventType, in_bracketed_paste: bool = False) -> None:
+        if key_event.text:
+            self.on_text(key_event.text, in_bracketed_paste)
+        else:
+            self.on_key(key_event)
 
     def on_text(self, text: str, in_bracketed_paste: bool = False) -> None:
         pass

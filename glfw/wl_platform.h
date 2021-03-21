@@ -230,14 +230,14 @@ typedef struct _GLFWlibraryWayland
     struct {
         uint32_t                key;
         id_type                 keyRepeatTimer;
-        _GLFWwindow*            keyboardFocus;
+        GLFWid                  keyboardFocusId;
     } keyRepeatInfo;
     id_type                     cursorAnimationTimer;
     _GLFWXKBData                xkb;
     _GLFWDBUSData               dbus;
 
     _GLFWwindow*                pointerFocus;
-    _GLFWwindow*                keyboardFocus;
+    GLFWid                      keyboardFocusId;
 
     struct {
         void*                   handle;

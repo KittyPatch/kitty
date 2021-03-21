@@ -17,19 +17,6 @@ typedef struct {
 } GraphicsCommand;
 
 typedef struct {
-    uint8_t *buf;
-    size_t buf_capacity, buf_used;
-
-    uint8_t *mapped_file;
-    size_t mapped_file_sz;
-
-    size_t data_sz;
-    uint8_t *data;
-    bool is_4byte_aligned;
-    bool is_opaque;
-} LoadData;
-
-typedef struct {
     float left, top, right, bottom;
 } ImageRect;
 
@@ -42,18 +29,29 @@ typedef struct {
     ImageRect src_rect;
 } ImageRef;
 
+typedef struct {
+    uint32_t gap, id, width, height, x, y, base_frame_id, bgcolor;
+    bool is_opaque, is_4byte_aligned, alpha_blend;
+} Frame;
+
+typedef enum { ANIMATION_STOPPED = 0, ANIMATION_LOADING = 1, ANIMATION_RUNNING = 2} AnimationState;
 
 typedef struct {
     uint32_t texture_id, client_id, client_number, width, height;
     id_type internal_id;
 
-    bool data_loaded;
-    LoadData load_data;
-
+    bool root_frame_data_loaded;
     ImageRef *refs;
-    size_t refcnt, refcap;
+    Frame *extra_frames, root_frame;
+    uint32_t current_frame_index, frame_id_counter;
+    uint64_t animation_duration;
+    size_t refcnt, refcap, extra_framecnt;
     monotonic_t atime;
     size_t used_storage;
+    bool is_drawn;
+    AnimationState animation_state;
+    uint32_t max_loops, current_loop;
+    monotonic_t current_frame_shown_at;
 } Image;
 
 typedef struct {
@@ -71,11 +69,31 @@ typedef struct {
 } ImageRenderData;
 
 typedef struct {
+    id_type image_id;
+    uint32_t frame_id;
+} ImageAndFrame;
+
+typedef struct {
+    uint8_t *buf;
+    size_t buf_capacity, buf_used;
+
+    uint8_t *mapped_file;
+    size_t mapped_file_sz;
+
+    size_t data_sz;
+    uint8_t *data;
+    bool is_4byte_aligned;
+    bool is_opaque, loading_completed_successfully;
+    uint32_t width, height;
+    GraphicsCommand start_command;
+    ImageAndFrame loading_for;
+} LoadData;
+
+typedef struct {
     PyObject_HEAD
 
-    size_t image_count, images_capacity;
-    id_type loading_image;
-    GraphicsCommand last_init_graphics_command;
+    size_t image_count, images_capacity, storage_limit;
+    LoadData currently_loading;
     Image *images;
     size_t count, capacity;
     ImageRenderData *render_data;
@@ -85,6 +103,8 @@ typedef struct {
     unsigned int last_scrolled_by;
     size_t used_storage;
     PyObject *disk_cache;
+    bool has_images_needing_animation, context_made_current_for_this_command;
+    id_type window_id;
 } GraphicsManager;
 
 
@@ -103,3 +123,4 @@ void grman_resize(GraphicsManager*, index_type, index_type, index_type, index_ty
 void grman_rescale(GraphicsManager *self, CellPixelSize fg);
 void gpu_data_for_centered_image(ImageRenderData *ans, unsigned int screen_width_px, unsigned int screen_height_px, unsigned int width, unsigned int height);
 bool png_path_to_bitmap(const char *path, uint8_t** data, unsigned int* width, unsigned int* height, size_t* sz);
+bool scan_active_animations(GraphicsManager *self, const monotonic_t now, monotonic_t *minimum_gap, bool os_window_context_set);

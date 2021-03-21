@@ -303,6 +303,50 @@ class TestScreen(BaseTest):
         s.resize(s.lines - 1, s.columns)
         self.ae(x_before, s.cursor.x)
 
+    def test_scrollback_fill_after_resize(self):
+        def prepare_screen(content=()):
+            ans = self.create_screen(options={'scrollback_fill_enlarged_window': True})
+            for line in content:
+                ans.draw(line)
+                ans.linefeed()
+                ans.carriage_return()
+            return ans
+
+        def assert_lines(*lines):
+            return self.ae(lines, tuple(str(s.line(i)) for i in range(s.lines)))
+
+        # Height increased, width unchanged → pull down lines to fill new space at the top
+        s = prepare_screen(map(str, range(6)))
+        assert_lines('2', '3', '4', '5', '')
+        dist_from_bottom = s.lines - s.cursor.y
+        s.resize(7, s.columns)
+        assert_lines('0', '1', '2', '3', '4', '5', '')
+        self.ae(dist_from_bottom, s.lines - s.cursor.y)
+
+        # Height increased, width increased → rewrap, pull down
+        s = prepare_screen(['0', '1', '2', '3' * 15])
+        assert_lines('2', '33333', '33333', '33333', '')
+        s.resize(7, 12)
+        assert_lines('0', '1', '2', '333333333333', '333', '', '')
+
+        # Height increased, width decreased → rewrap, pull down if possible
+        s = prepare_screen(['0', '1', '2', '3' * 5])
+        assert_lines('0', '1', '2', '33333', '')
+        s.resize(6, 4)
+        assert_lines('0', '1', '2', '3333', '3', '')
+
+        # Height unchanged, width increased → rewrap, pull down if possible
+        s = prepare_screen(['0', '1', '2', '3' * 15])
+        assert_lines('2', '33333', '33333', '33333', '')
+        s.resize(s.lines, 12)
+        assert_lines('1', '2', '333333333333', '333', '')
+
+        # Height decreased, width increased → rewrap, pull down if possible
+        s = prepare_screen(['0', '1', '2', '3' * 15])
+        assert_lines('2', '33333', '33333', '33333', '')
+        s.resize(4, 12)
+        assert_lines('2', '333333333333', '333', '')
+
     def test_tab_stops(self):
         # Taken from vttest/main.c
         s = self.create_screen(cols=80, lines=2)
@@ -727,6 +771,49 @@ class TestScreen(BaseTest):
 
         self.ae(str(s.linebuf), '0\n5\n6\n7\n\n')
         self.ae(str(s.historybuf), '')
+
+    def test_key_encoding_flags_stack(self):
+        s = self.create_screen()
+        c = s.callbacks
+
+        def w(code, p1='', p2=''):
+            p = f'{p1}'
+            if p2:
+                p += f';{p2}'
+            return parse_bytes(s, f'\033[{code}{p}u'.encode('ascii'))
+
+        def ac(flags):
+            parse_bytes(s, '\033[?u'.encode('ascii'))
+            self.ae(c.wtcbuf, f'\033[?{flags}u'.encode('ascii'))
+            c.clear()
+
+        ac(0)
+        w('=', 0b1001)
+        ac(0b1001)
+        w('=', 0b0011, 2)
+        ac(0b1011)
+        w('=', 0b0110, 3)
+        ac(0b1001)
+        s.reset()
+        ac(0)
+
+        w('>', 0b0011)
+        ac(0b0011)
+        w('=', 0b1111)
+        ac(0b1111)
+        w('>', 0b10)
+        ac(0b10)
+        w('<')
+        ac(0b1111)
+        for i in range(10):
+            w('<')
+            ac(0)
+        s.reset()
+
+        for i in range(1, 16):
+            w('>', i)
+        ac(15)
+        w('<'), ac(14), w('<'), ac(13)
 
     def test_color_stack(self):
         s = self.create_screen()

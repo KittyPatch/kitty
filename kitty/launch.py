@@ -3,17 +3,17 @@
 # License: GPLv3 Copyright: 2019, Kovid Goyal <kovid at kovidgoyal.net>
 
 
-from functools import lru_cache
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence
 
 from .boss import Boss
 from .child import Child
 from .cli import WATCHER_DEFINITION, parse_args
 from .cli_stub import LaunchCLIOptions
 from .constants import resolve_custom_file
-from .fast_data_types import set_clipboard_string
+from .fast_data_types import patch_color_profiles, set_clipboard_string
 from .tabs import Tab
-from .utils import find_exe, set_primary_selection, read_shell_environment
+from .types import run_once
+from .utils import find_exe, read_shell_environment, set_primary_selection
 from .window import Watchers, Window
 
 try:
@@ -22,7 +22,12 @@ except ImportError:
     TypedDict = Dict[str, Any]
 
 
-@lru_cache(maxsize=2)
+class LaunchSpec(NamedTuple):
+    opts: LaunchCLIOptions
+    args: List[str]
+
+
+@run_once
 def options_spec() -> str:
     return '''
 --window-title --title
@@ -156,16 +161,23 @@ Set the WM_NAME property on X11 for the newly created OS Window when using
 :option:`launch --type`=os-window. Defaults to :option:`launch --os-window-class`.
 
 
+--color
+type=list
+Change colors in the newly launched window. You can either specify a path to a .conf
+file with the same syntax as kitty.conf to read the colors from, or specify them
+individually, for example: ``--color background=white`` ``--color foreground=red``
+
+
 ''' + WATCHER_DEFINITION
 
 
-def parse_launch_args(args: Optional[Sequence[str]] = None) -> Tuple[LaunchCLIOptions, List[str]]:
+def parse_launch_args(args: Optional[Sequence[str]] = None) -> LaunchSpec:
     args = list(args or ())
     try:
         opts, args = parse_args(result_class=LaunchCLIOptions, args=args, ospec=options_spec)
     except SystemExit as e:
         raise ValueError from e
-    return opts, args
+    return LaunchSpec(opts, args)
 
 
 def get_env(opts: LaunchCLIOptions, active_child: Child) -> Dict[str, str]:
@@ -207,7 +219,7 @@ def load_watch_modules(watchers: Sequence[str]) -> Optional[Watchers]:
     ans = Watchers()
     for path in watchers:
         path = resolve_custom_file(path)
-        m = runpy.run_path(path, run_name='__kitty_watcher__')
+        m = runpy.run_path(path, run_name='__kitty_watcher__')  # type: ignore
         w = m.get('on_close')
         if callable(w):
             ans.on_close.append(w)
@@ -234,7 +246,20 @@ class LaunchKwds(TypedDict):
     stdin: Optional[bytes]
 
 
-def launch(boss: Boss, opts: LaunchCLIOptions, args: List[str], target_tab: Optional[Tab] = None) -> Optional[Window]:
+def apply_colors(window: Window, spec: Sequence[str]) -> None:
+    from kitty.rc.set_colors import parse_colors
+    colors, cursor_text_color = parse_colors(spec)
+    profiles = window.screen.color_profile,
+    patch_color_profiles(colors, cursor_text_color, profiles, True)
+
+
+def launch(
+    boss: Boss,
+    opts: LaunchCLIOptions,
+    args: List[str],
+    target_tab: Optional[Tab] = None,
+    force_target_tab: bool = False
+) -> Optional[Window]:
     active = boss.active_window_for_cwd
     active_child = getattr(active, 'child', None)
     env = get_env(opts, active_child)
@@ -311,10 +336,15 @@ def launch(boss: Boss, opts: LaunchCLIOptions, args: List[str], target_tab: Opti
             else:
                 set_primary_selection(stdin)
     else:
-        tab = tab_for_window(boss, opts, target_tab)
+        if force_target_tab:
+            tab = target_tab
+        else:
+            tab = tab_for_window(boss, opts, target_tab)
         if tab is not None:
             watchers = load_watch_modules(opts.watcher)
             new_window: Window = tab.new_window(env=env or None, watchers=watchers or None, **kw)
+            if opts.color:
+                apply_colors(new_window, opts.color)
             if opts.keep_focus and active:
                 boss.set_active_window(active, switch_os_window_if_needed=True)
             return new_window

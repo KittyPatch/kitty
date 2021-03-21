@@ -7,7 +7,7 @@ import os
 import shutil
 import sys
 from contextlib import contextmanager, suppress
-from typing import Generator, List, Mapping, Optional, Sequence
+from typing import Dict, Generator, List, Mapping, Optional, Sequence
 
 from .borders import load_borders_program
 from .boss import Boss
@@ -17,8 +17,8 @@ from .cli_stub import CLIOptions
 from .conf.utils import BadLine
 from .config import cached_values_for
 from .constants import (
-    SingleKey, appname, beam_cursor_data_file, config_dir, glfw_path, is_macos,
-    is_wayland, kitty_exe, logo_data_file, running_in_kitty
+    appname, beam_cursor_data_file, config_dir, glfw_path, is_macos,
+    is_wayland, kitty_exe, logo_png_file, running_in_kitty
 )
 from .fast_data_types import (
     GLFW_IBEAM_CURSOR, create_os_window, free_font_data, glfw_init,
@@ -30,6 +30,7 @@ from .fonts.render import set_font_family
 from .options_stub import Options as OptionsStub
 from .os_window_size import initial_window_size_func
 from .session import get_os_window_sizing_data
+from .types import SingleKey
 from .utils import (
     detach, expandvars, find_exe, log_error, read_shell_environment,
     single_instance, startup_notification_handler, unix_socket_paths
@@ -103,31 +104,40 @@ def init_glfw(opts: OptionsStub, debug_keyboard: bool = False) -> str:
     return glfw_module
 
 
-def get_new_os_window_trigger(opts: OptionsStub) -> Optional[SingleKey]:
-    new_os_window_trigger = None
-    if is_macos:
-        new_os_window_shortcuts = []
-        for k, v in opts.keymap.items():
-            if v.func == 'new_os_window':
-                new_os_window_shortcuts.append(k)
-        if new_os_window_shortcuts:
-            from .fast_data_types import cocoa_set_new_window_trigger
+def get_macos_shortcut_for(opts: OptionsStub, function: str = 'new_os_window') -> Optional[SingleKey]:
+    ans = None
+    candidates = []
+    for k, v in opts.keymap.items():
+        if v.func == function:
+            candidates.append(k)
+    if candidates:
+        from .fast_data_types import cocoa_set_global_shortcut
 
-            # Reverse list so that later defined keyboard shortcuts take priority over earlier defined ones
-            for candidate in reversed(new_os_window_shortcuts):
-                if cocoa_set_new_window_trigger(candidate[0], candidate[2]):
-                    new_os_window_trigger = candidate
-                    break
-    return new_os_window_trigger
+        # Reverse list so that later defined keyboard shortcuts take priority over earlier defined ones
+        for candidate in reversed(candidates):
+            if cocoa_set_global_shortcut(function, candidate[0], candidate[2]):
+                ans = candidate
+                break
+    return ans
+
+
+def set_x11_window_icon() -> None:
+    # max icon size on X11 64bits is 128x128
+    path, ext = os.path.splitext(logo_png_file)
+    set_default_window_icon(path + '-128' + ext)
 
 
 def _run_app(opts: OptionsStub, args: CLIOptions, bad_lines: Sequence[BadLine] = ()) -> None:
-    new_os_window_trigger = get_new_os_window_trigger(opts)
+    global_shortcuts: Dict[str, SingleKey] = {}
+    if is_macos:
+        for ac in ('new_os_window', 'close_os_window', 'close_tab', 'edit_config_file', 'previous_tab', 'next_tab', 'new_tab'):
+            val = get_macos_shortcut_for(opts, ac)
+            if val is not None:
+                global_shortcuts[ac] = val
     if is_macos and opts.macos_custom_beam_cursor:
         set_custom_ibeam_cursor()
     if not is_wayland() and not is_macos:  # no window icons on wayland
-        with open(logo_data_file, 'rb') as f:
-            set_default_window_icon(f.read(), 256, 256)
+        set_x11_window_icon()
     load_shader_programs.use_selection_fg = opts.selection_foreground is not None
     with cached_values_for(run_app.cached_values_name) as cached_values:
         with startup_notification_handler(extra_callback=run_app.first_window_callback) as pre_show_callback:
@@ -136,7 +146,7 @@ def _run_app(opts: OptionsStub, args: CLIOptions, bad_lines: Sequence[BadLine] =
                     pre_show_callback,
                     args.title or appname, args.name or args.cls or appname,
                     args.cls or appname, load_all_shaders)
-        boss = Boss(opts, args, cached_values, new_os_window_trigger)
+        boss = Boss(opts, args, cached_values, global_shortcuts)
         boss.start(window_id)
         if bad_lines:
             boss.show_bad_config_lines(bad_lines)

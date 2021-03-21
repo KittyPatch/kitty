@@ -35,15 +35,18 @@ def install_deps():
     else:
         run('sudo apt-get update')
         run('sudo apt-get install -y libgl1-mesa-dev libxi-dev libxrandr-dev libxinerama-dev'
-            ' libxcursor-dev libxcb-xkb-dev libdbus-1-dev libxkbcommon-dev libharfbuzz-dev'
-            ' libpng-dev liblcms2-dev libfontconfig-dev libxkbcommon-x11-dev libcanberra-dev')
+            ' libxcursor-dev libxcb-xkb-dev libdbus-1-dev libxkbcommon-dev libharfbuzz-dev libx11-xcb-dev'
+            ' libpng-dev liblcms2-dev libfontconfig-dev libxkbcommon-x11-dev libcanberra-dev uuid-dev')
     if is_bundle:
         install_bundle()
     else:
         if is_macos:
             # needed for zlib for pillow, should not be needed after pillow 8.0
             os.environ['PKG_CONFIG_PATH'] = '/usr/local/opt/zlib/lib/pkgconfig'
-        run('pip3 install Pillow pygments')
+        cmd = 'pip3 install Pillow pygments'
+        if sys.version_info[:2] < (3, 7):
+            cmd += ' importlib-resources'
+        run(cmd)
 
 
 def build_kitty():

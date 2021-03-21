@@ -8,16 +8,20 @@ import sys
 from base64 import standard_b64encode
 from collections import defaultdict, deque
 from contextlib import suppress
+from enum import IntEnum
 from itertools import count
 from typing import (
-    Any, Callable, DefaultDict, Deque, Dict, List, Optional, Sequence, Tuple,
-    Union
+    Any, Callable, DefaultDict, Deque, Dict, Iterator, List, Optional,
+    Sequence, Tuple, Union
 )
 
+from kitty.fast_data_types import create_canvas
 from kitty.typing import (
     CompletedProcess, GRT_a, GRT_d, GRT_f, GRT_m, GRT_o, GRT_t, HandlerType
 )
-from kitty.utils import ScreenSize, find_exe, fit_image
+from kitty.utils import (
+    ScreenSize, find_exe, fit_image, positive_float, positive_int
+)
 
 from .operations import cursor
 
@@ -28,11 +32,68 @@ except Exception:
     fsenc = 'utf-8'
 
 
+class Dispose(IntEnum):
+    undefined = 0
+    none = 1
+    background = 2
+    previous = 3
+
+
+class Frame:
+    gap: int  # milliseconds
+    canvas_width: int
+    canvas_height: int
+    width: int
+    height: int
+    index: int
+    xdpi: float
+    ydpi: float
+    canvas_x: int
+    canvas_y: int
+    mode: str
+    needs_blend: bool
+    dispose: Dispose
+    path: str = ''
+
+    def __init__(self, identify_data: Union['Frame', Dict[str, str]]):
+        if isinstance(identify_data, Frame):
+            for k in Frame.__annotations__:
+                setattr(self, k, getattr(identify_data, k))
+        else:
+            self.gap = max(0, int(identify_data['gap']) * 10)
+            sz, pos = identify_data['canvas'].split('+', 1)
+            self.canvas_width, self.canvas_height = map(positive_int, sz.split('x', 1))
+            self.canvas_x, self.canvas_y = map(int, pos.split('+', 1))
+            self.width, self.height = map(positive_int, identify_data['size'].split('x', 1))
+            self.xdpi, self.ydpi = map(positive_float, identify_data['dpi'].split('x', 1))
+            self.index = positive_int(identify_data['index'])
+            q = identify_data['transparency'].lower()
+            self.mode = 'rgba' if q in ('blend', 'true') else 'rgb'
+            self.needs_blend = q == 'blend'
+            self.dispose = getattr(Dispose, identify_data['dispose'].lower())
+
+    def __repr__(self) -> str:
+        canvas = f'{self.canvas_width}x{self.canvas_height}:{self.canvas_x}+{self.canvas_y}'
+        geom = f'{self.width}x{self.height}'
+        return f'Frame(index={self.index}, gap={self.gap}, geom={geom}, canvas={canvas})'
+
+
 class ImageData:
 
-    def __init__(self, fmt: str, width: int, height: int, mode: str):
+    def __init__(self, fmt: str, width: int, height: int, mode: str, frames: List[Frame]):
         self.width, self.height, self.fmt, self.mode = width, height, fmt, mode
         self.transmit_fmt: GRT_f = (24 if self.mode == 'rgb' else 32)
+        self.frames = frames
+
+    def __len__(self) -> int:
+        return len(self.frames)
+
+    def __iter__(self) -> Iterator[Frame]:
+        yield from self.frames
+
+    def __repr__(self) -> str:
+        frames = '\n  '.join(map(repr, self.frames))
+        return f'Image(fmt={self.fmt}, mode={self.mode},\n  {frames}\n)'
 
 
 class OpenFailed(ValueError):
@@ -57,8 +118,20 @@ class NoImageMagick(Exception):
     pass
 
 
+class OutdatedImageMagick(ValueError):
+
+    def __init__(self, detailed_error: str):
+        super().__init__('ImageMagick on this system is too old ImageMagick 7+ required which was first released in 2016')
+        self.detailed_error = detailed_error
+
+
+last_imagemagick_cmd: Sequence[str] = ()
+
+
 def run_imagemagick(path: str, cmd: Sequence[str], keep_stdout: bool = True) -> CompletedProcess:
+    global last_imagemagick_cmd
     import subprocess
+    last_imagemagick_cmd = cmd
     try:
         p = subprocess.run(cmd, stdout=subprocess.PIPE if keep_stdout else subprocess.DEVNULL, stderr=subprocess.PIPE)
     except FileNotFoundError:
@@ -69,25 +142,54 @@ def run_imagemagick(path: str, cmd: Sequence[str], keep_stdout: bool = True) -> 
 
 
 def identify(path: str) -> ImageData:
-    p = run_imagemagick(path, ['identify', '-format', '%m %w %h %A', '--', path])
-    parts: Tuple[str, ...] = tuple(filter(None, p.stdout.decode('utf-8').split()))
-    mode = 'rgb' if parts[3].lower() == 'false' else 'rgba'
-    return ImageData(parts[0].lower(), int(parts[1]), int(parts[2]), mode)
+    import json
+    q = '{"fmt":"%m","canvas":"%g","transparency":"%A","gap":"%T","index":"%p","size":"%wx%h","dpi":"%xx%y","dispose":"%D"},'
+    exe = find_exe('magick')
+    if exe:
+        cmd = [exe, 'identify']
+    else:
+        cmd = ['identify']
+    p = run_imagemagick(path, cmd + ['-format', q, '--', path])
+    data = json.loads(b'[' + p.stdout.rstrip(b',') + b']')
+    first = data[0]
+    frames = list(map(Frame, data))
+    mode = 'rgb'
+    for f in frames:
+        if f.mode == 'rgba':
+            mode = 'rgba'
+            break
+    return ImageData(first['fmt'].lower(), frames[0].canvas_width, frames[0].canvas_height, mode, frames)
 
 
-def convert(
-    path: str, m: ImageData,
+class RenderedImage(ImageData):
+
+    def __init__(self, fmt: str, width: int, height: int, mode: str):
+        super().__init__(fmt, width, height, mode, [])
+
+
+def render_image(
+    path: str, output_prefix: str,
+    m: ImageData,
     available_width: int, available_height: int,
     scale_up: bool,
-    tdir: Optional[str] = None
-) -> Tuple[str, int, int]:
-    from tempfile import NamedTemporaryFile
-    width, height = m.width, m.height
-    exe = find_exe('convert')
-    if exe is None:
-        raise OSError('Failed to find the ImageMagick convert executable, make sure it is present in PATH')
-    cmd = [exe, '-background', 'none', '--', path]
+    only_first_frame: bool = False
+) -> RenderedImage:
+    import tempfile
+    has_multiple_frames = len(m) > 1
+    get_multiple_frames = has_multiple_frames and not only_first_frame
+    exe = find_exe('magick')
+    if exe:
+        cmd = [exe, 'convert']
+    else:
+        exe = find_exe('convert')
+        if exe is None:
+            raise OSError('Failed to find the ImageMagick convert executable, make sure it is present in PATH')
+        cmd = [exe]
+    cmd += ['-background', 'none', '--', path]
+    if only_first_frame and has_multiple_frames:
+        cmd[-1] += '[0]'
     scaled = False
+    width, height = m.width, m.height
     if scale_up:
         if width < available_width:
             r = available_width / width
@@ -95,25 +197,86 @@ def convert(
             scaled = True
     if scaled or width > available_width or height > available_height:
         width, height = fit_image(width, height, available_width, available_height)
-        cmd += ['-resize', '{}x{}!'.format(width, height)]
-    cmd += ['-depth', '8']
-    with NamedTemporaryFile(prefix='icat-', suffix='.' + m.mode, delete=False, dir=tdir) as outfile:
-        run_imagemagick(path, cmd + [outfile.name])
-    # ImageMagick sometimes generated rgba images smaller than the specified
-    # size. See https://github.com/kovidgoyal/kitty/issues/276 for examples
-    sz = os.path.getsize(outfile.name)
+        resize_cmd = ['-resize', '{}x{}!'.format(width, height)]
+        if get_multiple_frames:
+            # we have to coalesce, resize and de-coalesce all frames
+            resize_cmd = ['-coalesce'] + resize_cmd + ['-deconstruct']
+        cmd += resize_cmd
+    cmd += ['-depth', '8', '-set', 'filename:f', '%w-%h-%g-%p']
+    ans = RenderedImage(m.fmt, width, height, m.mode)
+    if only_first_frame:
+        ans.frames = [Frame(m.frames[0])]
+    else:
+        ans.frames = list(map(Frame, m.frames))
     bytes_per_pixel = 3 if m.mode == 'rgb' else 4
-    expected_size = bytes_per_pixel * width * height
-    if sz < expected_size:
-        missing = expected_size - sz
-        if missing % (bytes_per_pixel * width) != 0:
-            raise ConvertFailed(
-                path, 'ImageMagick failed to convert {} correctly,'
-                ' it generated {} < {} of data (w={}, h={}, bpp={})'.format(
-                    path, sz, expected_size, width, height, bytes_per_pixel))
-        height -= missing // (bytes_per_pixel * width)
 
-    return outfile.name, width, height
+    def check_resize(frame: Frame) -> None:
+        # ImageMagick sometimes generates RGBA images smaller than the specified
+        # size. See https://github.com/kovidgoyal/kitty/issues/276 for examples
+        sz = os.path.getsize(frame.path)
+        expected_size = bytes_per_pixel * frame.width * frame.height
+        if sz < expected_size:
+            missing = expected_size - sz
+            if missing % (bytes_per_pixel * width) != 0:
+                raise ConvertFailed(
+                    path, 'ImageMagick failed to convert {} correctly,'
+                    ' it generated {} < {} of data (w={}, h={}, bpp={})'.format(
+                        path, sz, expected_size, frame.width, frame.height, bytes_per_pixel))
+            frame.height -= missing // (bytes_per_pixel * frame.width)
+            if frame.index == 0:
+                ans.height = frame.height
+                ans.width = frame.width
+
+    with tempfile.TemporaryDirectory(dir=os.path.dirname(output_prefix)) as tdir:
+        output_template = os.path.join(tdir, f'im-%[filename:f].{m.mode}')
+        if get_multiple_frames:
+            cmd.append('+adjoin')
+        run_imagemagick(path, cmd + [output_template])
+        unseen = {x.index for x in m}
+        for x in os.listdir(tdir):
+            try:
+                parts = x.split('.', 1)[0].split('-')
+                index = int(parts[-1])
+                unseen.discard(index)
+                f = ans.frames[index]
+                f.width, f.height = map(positive_int, parts[1:3])
+                sz, pos = parts[3].split('+', 1)
+                f.canvas_width, f.canvas_height = map(positive_int, sz.split('x', 1))
+                f.canvas_x, f.canvas_y = map(int, pos.split('+', 1))
+            except Exception:
+                raise OutdatedImageMagick(f'Unexpected output filename: {x!r} produced by ImageMagick command: {last_imagemagick_cmd}')
+            f.path = output_prefix + f'-{index}.{m.mode}'
+            os.rename(os.path.join(tdir, x), f.path)
+            check_resize(f)
+    f = ans.frames[0]
+    if f.width != ans.width or f.height != ans.height:
+        with open(f.path, 'r+b') as ff:
+            data = ff.read()
+            ff.seek(0)
+            ff.truncate()
+            cd = create_canvas(data, f.width, f.canvas_x, f.canvas_y, ans.width, ans.height, 3 if ans.mode == 'rgb' else 4)
+            ff.write(cd)
+    if get_multiple_frames:
+        if unseen:
+            raise ConvertFailed(path, f'Failed to render {len(unseen)} out of {len(m)} frames of animation')
+    elif not ans.frames[0].path:
+        raise ConvertFailed(path, 'Failed to render image')
+
+    return ans
+
+
+def render_as_single_image(
+    path: str, m: ImageData,
+    available_width: int, available_height: int,
+    scale_up: bool,
+    tdir: Optional[str] = None
+) -> Tuple[str, int, int]:
+    import tempfile
+    fd, output = tempfile.mkstemp(prefix='icat-', suffix=f'.{m.mode}', dir=tdir)
+    os.close(fd)
+    result = render_image(path, output, m, available_width, available_height, scale_up, only_first_frame=True)
+    os.rename(result.frames[0].path, output)
+    return output, result.width, result.height
 
 
 def can_display_images() -> bool:
@@ -131,6 +294,7 @@ SentImageKey = Tuple[int, int, int]
 
 class GraphicsCommand:
     a: GRT_a = 't'  # action
+    q: int = 0      # suppress responses
     f: GRT_f = 32   # image data format
     t: GRT_t = 'd'  # transmission medium
     s: int = 0        # sent image width
@@ -138,6 +302,7 @@ class GraphicsCommand:
     S: int = 0        # size of data to read from file
     O: int = 0        # offset of data to read from file
     i: int = 0        # image id
+    I: int = 0        # image number
     p: int = 0        # placement id
     o: Optional[GRT_o] = None  # type of compression
     m: GRT_m = 0    # 0 or 1 whether there is more chunked data
@@ -152,7 +317,16 @@ class GraphicsCommand:
     z: int = 0        # z-index
     d: GRT_d = 'a'  # what to delete
 
-    def serialize(self, payload: bytes = b'') -> bytes:
+    def __repr__(self) -> str:
+        return self.serialize().decode('ascii').replace('\033', '^]')
+
+    def clone(self) -> 'GraphicsCommand':
+        ans = GraphicsCommand()
+        for k in GraphicsCommand.__annotations__:
+            setattr(ans, k, getattr(self, k))
+        return ans
+
+    def serialize(self, payload: Union[bytes, str] = b'') -> bytes:
         items = []
         for k in GraphicsCommand.__annotations__:
             val: Union[str, None, int] = getattr(self, k)
@@ -166,6 +340,8 @@ class GraphicsCommand:
         w(','.join(items).encode('ascii'))
         if payload:
             w(b';')
+            if isinstance(payload, str):
+                payload = standard_b64encode(payload.encode('utf-8'))
             w(payload)
         w(b'\033\\')
         return b''.join(ans)
@@ -330,7 +506,7 @@ class ImageManager:
             self.handler.cmd.gr_command(gc)
 
     def convert_image(self, path: str, available_width: int, available_height: int, image_data: ImageData, scale_up: bool = False) -> ImageKey:
-        rgba_path, width, height = convert(path, image_data, available_width, available_height, scale_up, tdir=self.tdir)
+        rgba_path, width, height = render_as_single_image(path, image_data, available_width, available_height, scale_up, tdir=self.tdir)
         return rgba_path, width, height
 
     def transmit_image(self, image_data: ImageData, image_id: int, rgba_path: str, width: int, height: int) -> int:
