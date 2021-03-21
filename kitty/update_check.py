@@ -16,7 +16,7 @@ from .notify import notify
 from .utils import log_error, open_url
 
 CHANGELOG_URL = 'https://sw.kovidgoyal.net/kitty/changelog.html'
-RELEASED_VERSION_URL = 'https://sw.kovidgoyal.net/kitty/current-version.txt'
+RELEASED_VERSION_URL = 'https://raw.githubusercontent.com/KittyPatch/kitty/master/current-version.txt'
 CHECK_INTERVAL = 24 * 60 * 60.
 
 

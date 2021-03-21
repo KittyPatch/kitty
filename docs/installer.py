@@ -75,7 +75,7 @@ class Reporter:  # {{{
 
 def get_latest_release_data():
     print('Checking for latest release on GitHub...')
-    req = urllib.Request('https://api.github.com/repos/kovidgoyal/kitty/releases/latest', headers={'Accept': 'application/vnd.github.v3+json'})
+    req = urllib.Request('https://api.github.com/repos/KittyPatch/kitty/releases/latest', headers={'Accept': 'application/vnd.github.v3+json'})
     try:
         res = urllib.urlopen(req).read().decode('utf-8')
     except Exception as err:

@@ -1,9 +1,9 @@
 Building kitty from source
 ==============================
 
-.. image:: https://github.com/kovidgoyal/kitty/workflows/CI/badge.svg
+.. image:: https://github.com/KittyPatch/kitty/workflows/CI/badge.svg
   :alt: Build status
-  :target: https://github.com/kovidgoyal/kitty/actions?query=workflow%3ACI
+  :target: https://github.com/KittyPatch/kitty/actions?query=workflow%3ACI
 
 
 |kitty| is designed to run from source, for easy hackability. Make sure
@@ -96,7 +96,7 @@ Note for Linux/macOS packagers
 ----------------------------------
 
 The released |kitty| source code is available as a `tarball`_ from
-`the GitHub releases page <https://github.com/kovidgoyal/kitty/releases>`_.
+`the GitHub releases page <https://github.com/KittyPatch/kitty/releases>`_.
 
 While |kitty| does use python, it is not a traditional python package, so please
 do not install it in site-packages.
