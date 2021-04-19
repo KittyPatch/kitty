@@ -56,6 +56,9 @@ class WindowDict(TypedDict):
     cmdline: List[str]
     env: Dict[str, str]
     foreground_processes: List[ProcessDesc]
+    is_self: bool
+    lines: int
+    columns: int
 
 
 class PipeData(TypedDict):
@@ -381,7 +384,7 @@ class Window:
         return 'Window(title={}, id={})'.format(
                 self.title, self.id)
 
-    def as_dict(self, is_focused: bool = False) -> WindowDict:
+    def as_dict(self, is_focused: bool = False, is_self: bool = False) -> WindowDict:
         return dict(
             id=self.id,
             is_focused=is_focused,
@@ -390,7 +393,10 @@ class Window:
             cwd=self.child.current_cwd or self.child.cwd,
             cmdline=self.child.cmdline,
             env=self.child.environ,
-            foreground_processes=self.child.foreground_processes
+            foreground_processes=self.child.foreground_processes,
+            is_self=is_self,
+            lines=self.screen.lines,
+            columns=self.screen.columns,
         )
 
     def serialize_state(self) -> Dict[str, Any]:
@@ -426,7 +432,7 @@ class Window:
             return False
         assert not isinstance(pat, tuple)
 
-        if field == 'id':
+        if field in ('id', 'window_id'):
             return True if pat.pattern == str(self.id) else False
         if field == 'pid':
             return True if pat.pattern == str(self.child.pid) else False

@@ -1,11 +1,11 @@
-// unicode data, built from the unicode standard on: 2020-09-22
+// unicode data, built from the unicode standard on: 2021-04-02
 // see gen-wcwidth.py
 #pragma once
 #include "data-types.h"
 
 START_ALLOW_CASE_RANGE
 
-static int
+static inline int
 wcwidth_std(int32_t code) {
 	if (LIKELY(0x20 <= code && code <= 0x7e)) return 1;
 	switch(code) {

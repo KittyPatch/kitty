@@ -55,6 +55,7 @@
       "wl_platform.h",
       "posix_thread.h",
       "wl_cursors.h",
+      "wl_text_input.h",
       "xkb_glfw.h",
       "dbus_glfw.h",
       "ibus_glfw.h",
@@ -64,6 +65,8 @@
       "linux_joystick.h",
       "null_joystick.h",
       "linux_notify.h",
+      "linux_desktop_settings.h",
+      "wl_client_side_decorations.h",
       "main_loop.h"
     ],
     "protocols": [
@@ -73,13 +76,16 @@
       "unstable/pointer-constraints/pointer-constraints-unstable-v1.xml",
       "unstable/idle-inhibit/idle-inhibit-unstable-v1.xml",
       "unstable/xdg-decoration/xdg-decoration-unstable-v1.xml",
-      "unstable/primary-selection/primary-selection-unstable-v1.xml"
+      "unstable/primary-selection/primary-selection-unstable-v1.xml",
+      "unstable/text-input/text-input-unstable-v3.xml"
     ],
     "sources": [
       "wl_init.c",
       "wl_monitor.c",
       "wl_window.c",
       "wl_cursors.c",
+      "wl_text_input.c",
+      "wl_client_side_decorations.c",
       "posix_thread.c",
       "xkb_glfw.c",
       "dbus_glfw.c",
@@ -88,6 +94,7 @@
       "osmesa_context.c",
       "backend_utils.c",
       "linux_joystick.c",
+      "linux_desktop_settings.c",
       "null_joystick.c",
       "linux_notify.c"
     ]

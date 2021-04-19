@@ -4,7 +4,20 @@ Changelog
 |kitty| is a feature-rich, cross-platform, *fast*, GPU based terminal.
 To update |kitty|, :doc:`follow the instructions <binary>`.
 
-0.20.0 [future]
+0.20.1 [2021-04-19]
+----------------------
+
+- icat: Fix some broken GIF images with no frame delays not being animated
+  (:iss:`3498`)
+
+- hints kitten: Fix sending hyperlinks to their default handler not working
+  (:pull:`3500`)
+
+- Wayland: Fix regression in previous release causing window decorations to
+  be drawn even when compositor supports server side decorations (:iss:`3501`)
+
+
+0.20.0 [2021-04-19]
 ----------------------
 
 - Support display of animated images ``kitty +kitten icat animation.gif``. See
@@ -46,14 +59,27 @@ To update |kitty|, :doc:`follow the instructions <binary>`.
 
 - Double clicking on empty tab bar area now opens a new tab (:iss:`3201`)
 
+- kitty @ ls: Show only environment variables that are different for each
+  window, by default.
+
 - When passing a directory or a non-executable file as the program to run to
-  kitty open it with the shell, instead of just failing.
+  kitty opens it with the shell or by parsing the shebang, instead of just failing.
 
 - Linux: Fix rendering of emoji followed by the graphics variation selector not
   being colored with some fonts (:iss:`3211`)
 
 - Unicode input: Fix using index in select by name mode not working for indices
   larger than 16. Also using an index does not filter the list of matches. (:pull:`3219`)
+
+- Wayland: Add support for the text input protocol (:iss:`3410`)
+
+- Wayland: Fix mouse handling when using client side decorations
+
+- Wayland: Fix un-maximizing a window not restoring its size to what it was
+  before being maximized
+
+- GNOME/Wayland: Improve window decorations the titlebar now shows the window
+  title. Allow running under Wayland on GNOME by default. (:iss:`3284`)
 
 - Panel kitten: Allow setting WM_CLASS (:iss:`3233`)
 
@@ -101,6 +127,18 @@ To update |kitty|, :doc:`follow the instructions <binary>`.
 
 - Improve rendering of rounded corners by using a rectircle equation rather
   than a cubic bezier (:iss:`3409`)
+
+- Graphics protocol: Add a control to allow clients to specify that the cursor
+  should not move when displaying an image (:iss:`3411`)
+
+- Fix marking of text not working on lines that contain zero cells
+  (:iss:`3403`)
+
+- Fix the selection getting changed if the screen contents scroll while
+  the selection is in progress (:iss:`3431`)
+
+- X11: Fix :opt:`resize_in_steps` being applied even when window is maximized
+  (:iss:`3473`)
 
 
 0.19.3 [2020-12-19]

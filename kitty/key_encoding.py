@@ -97,31 +97,34 @@ functional_key_number_to_name_map = {
     57424: 'KP_END',
     57425: 'KP_INSERT',
     57426: 'KP_DELETE',
-    57427: 'MEDIA_PLAY',
-    57428: 'MEDIA_PAUSE',
-    57429: 'MEDIA_PLAY_PAUSE',
-    57430: 'MEDIA_REVERSE',
-    57431: 'MEDIA_STOP',
-    57432: 'MEDIA_FAST_FORWARD',
-    57433: 'MEDIA_REWIND',
-    57434: 'MEDIA_TRACK_NEXT',
-    57435: 'MEDIA_TRACK_PREVIOUS',
-    57436: 'MEDIA_RECORD',
-    57437: 'LOWER_VOLUME',
-    57438: 'RAISE_VOLUME',
-    57439: 'MUTE_VOLUME',
-    57440: 'LEFT_SHIFT',
-    57441: 'LEFT_CONTROL',
-    57442: 'LEFT_ALT',
-    57443: 'LEFT_SUPER',
-    57444: 'LEFT_HYPER',
-    57445: 'RIGHT_SHIFT',
-    57446: 'RIGHT_CONTROL',
-    57447: 'RIGHT_ALT',
-    57448: 'RIGHT_SUPER',
-    57449: 'RIGHT_HYPER',
-    57450: 'ISO_LEVEL3_SHIFT',
-    57451: 'ISO_LEVEL5_SHIFT'}
+    57427: 'KP_BEGIN',
+    57428: 'MEDIA_PLAY',
+    57429: 'MEDIA_PAUSE',
+    57430: 'MEDIA_PLAY_PAUSE',
+    57431: 'MEDIA_REVERSE',
+    57432: 'MEDIA_STOP',
+    57433: 'MEDIA_FAST_FORWARD',
+    57434: 'MEDIA_REWIND',
+    57435: 'MEDIA_TRACK_NEXT',
+    57436: 'MEDIA_TRACK_PREVIOUS',
+    57437: 'MEDIA_RECORD',
+    57438: 'LOWER_VOLUME',
+    57439: 'RAISE_VOLUME',
+    57440: 'MUTE_VOLUME',
+    57441: 'LEFT_SHIFT',
+    57442: 'LEFT_CONTROL',
+    57443: 'LEFT_ALT',
+    57444: 'LEFT_SUPER',
+    57445: 'LEFT_HYPER',
+    57446: 'LEFT_META',
+    57447: 'RIGHT_SHIFT',
+    57448: 'RIGHT_CONTROL',
+    57449: 'RIGHT_ALT',
+    57450: 'RIGHT_SUPER',
+    57451: 'RIGHT_HYPER',
+    57452: 'RIGHT_META',
+    57453: 'ISO_LEVEL3_SHIFT',
+    57454: 'ISO_LEVEL5_SHIFT'}
 csi_number_to_functional_number_map = {
     2: 57348,
     3: 57349,
@@ -144,7 +147,7 @@ csi_number_to_functional_number_map = {
     24: 57375,
     27: 57344,
     127: 57347}
-letter_trailer_to_csi_number_map = {'A': 57352, 'B': 57353, 'C': 57351, 'D': 57350, 'F': 8, 'H': 7, 'P': 11, 'Q': 12, 'R': 13, 'S': 14}
+letter_trailer_to_csi_number_map = {'A': 57352, 'B': 57353, 'C': 57351, 'D': 57350, 'E': 57427, 'F': 8, 'H': 7, 'P': 11, 'Q': 12, 'R': 13, 'S': 14}
 tilde_trailers = {57348, 57349, 57354, 57355, 57368, 57369, 57370, 57371, 57372, 57373, 57374, 57375}
 # end csi mapping
 # }}}
@@ -190,7 +193,7 @@ def parse_shortcut(spec: str) -> ParsedShortcut:
         key_name = character_key_name_aliases.get(key_name.upper(), key_name)
     mod_val = 0
     if len(parts) > 1:
-        mods = tuple(config_mod_map.get(x.upper(), SUPER << 8) for x in parts[:-1])
+        mods = tuple(config_mod_map.get(x.upper(), META << 8) for x in parts[:-1])
         for x in mods:
             mod_val |= x
     return ParsedShortcut(mod_val, key_name)
@@ -207,16 +210,21 @@ class KeyEvent(NamedTuple):
     alt: bool = False
     ctrl: bool = False
     super: bool = False
+    hyper: bool = False
+    meta: bool = False
+    caps_lock: bool = False
+    num_lock: bool = False
 
     def matches(self, spec: Union[str, ParsedShortcut], types: int = EventType.PRESS | EventType.REPEAT) -> bool:
+        mods = self.mods & ~(NUM_LOCK | CAPS_LOCK)
         if not self.type & types:
             return False
         if isinstance(spec, str):
             spec = parse_shortcut(spec)
-        if (self.mods, self.key) == spec:
+        if (mods, self.key) == spec:
             return True
         is_shifted = bool(self.shifted_key and self.shift)
-        if is_shifted and (self.mods & ~SHIFT, self.shifted_key) == spec:
+        if is_shifted and (mods & ~SHIFT, self.shifted_key) == spec:
             return True
         return False
 
@@ -236,6 +244,14 @@ class KeyEvent(NamedTuple):
                 mods |= defines.GLFW_MOD_CONTROL
             if self.super:
                 mods |= defines.GLFW_MOD_SUPER
+            if self.hyper:
+                mods |= defines.GLFW_MOD_HYPER
+            if self.meta:
+                mods |= defines.GLFW_MOD_META
+            if self.caps_lock:
+                mods |= defines.GLFW_MOD_CAPS_LOCK
+            if self.num_lock:
+                mods |= defines.GLFW_MOD_NUM_LOCK
 
         fnm = get_name_to_functional_number_map()
 
@@ -248,7 +264,7 @@ class KeyEvent(NamedTuple):
             action=action, text=self.text)
 
 
-SHIFT, ALT, CTRL, SUPER = 1, 2, 4, 8
+SHIFT, ALT, CTRL, SUPER, HYPER, META, CAPS_LOCK, NUM_LOCK = 1, 2, 4, 8, 16, 32, 64, 128
 enter_key = KeyEvent(key='ENTER')
 backspace_key = KeyEvent(key='BACKSPACE')
 config_mod_map = {
@@ -260,7 +276,11 @@ config_mod_map = {
     'CMD': SUPER,
     'SUPER': SUPER,
     'CTRL': CTRL,
-    'CONTROL': CTRL
+    'CONTROL': CTRL,
+    'HYPER': HYPER,
+    'META': META,
+    'NUM_LOCK': NUM_LOCK,
+    'CAPS_LOCK': CAPS_LOCK,
 }
 
 
@@ -276,7 +296,7 @@ def decode_key_event(csi: str, csi_type: str) -> KeyEvent:
     mods = (second_section[0] - 1) if second_section else 0
     action = second_section[1] if len(second_section) > 1 else 1
     keynum = first_section[0]
-    if csi_type in 'ABCDHFPQRS':
+    if csi_type in 'ABCDEHFPQRS':
         keynum = letter_trailer_to_csi_number_map[csi_type]
 
     def key_name(num: int) -> str:
@@ -294,6 +314,8 @@ def decode_key_event(csi: str, csi_type: str) -> KeyEvent:
     return KeyEvent(
         mods=mods, shift=bool(mods & SHIFT), alt=bool(mods & ALT),
         ctrl=bool(mods & CTRL), super=bool(mods & SUPER),
+        hyper=bool(mods & HYPER), meta=bool(mods & META),
+        caps_lock=bool(mods & CAPS_LOCK), num_lock=bool(mods & NUM_LOCK),
         key=key_name(keynum),
         shifted_key=key_name(first_section[1] if len(first_section) > 1 else 0),
         alternate_key=key_name(first_section[2] if len(first_section) > 2 else 0),
@@ -346,6 +368,14 @@ def encode_key_event(key_event: KeyEvent) -> str:
             m |= 4
         if key_event.super:
             m |= 8
+        if key_event.hyper:
+            m |= 16
+        if key_event.meta:
+            m |= 32
+        if key_event.caps_lock:
+            m |= 64
+        if key_event.num_lock:
+            m |= 128
         if action > 1 or m:
             ans += f';{m+1}'
             if action > 1:

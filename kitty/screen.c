@@ -222,18 +222,24 @@ static inline void
 index_selection(const Screen *self, Selections *selections, bool up) {
     for (size_t i = 0; i < selections->count; i++) {
         Selection *s = selections->items + i;
-        if (!is_selection_empty(s)) {
-            if (up) {
-                if (s->start.y == 0) s->start_scrolled_by += 1;
-                else s->start.y--;
-                if (s->end.y == 0) s->end_scrolled_by += 1;
-                else s->end.y--;
-            } else {
-                if (s->start.y >= self->lines - 1) s->start_scrolled_by -= 1;
-                else s->start.y++;
-                if (s->end.y >= self->lines - 1) s->end_scrolled_by -= 1;
-                else s->end.y++;
+        if (up) {
+            if (s->start.y == 0) s->start_scrolled_by += 1;
+            else {
+                s->start.y--;
+                if (s->input_start.y) s->input_start.y--;
+                if (s->input_current.y) s->input_current.y--;
             }
+            if (s->end.y == 0) s->end_scrolled_by += 1;
+            else s->end.y--;
+        } else {
+            if (s->start.y >= self->lines - 1) s->start_scrolled_by -= 1;
+            else {
+                s->start.y++;
+                if (s->input_start.y < self->lines - 1) s->input_start.y++;
+                if (s->input_current.y < self->lines - 1) s->input_current.y++;
+            }
+            if (s->end.y >= self->lines - 1) s->end_scrolled_by -= 1;
+            else s->end.y++;
         }
     }
 }
@@ -267,6 +273,7 @@ screen_resize(Screen *self, unsigned int lines, unsigned int columns) {
     index_type num_content_lines_before, num_content_lines_after, num_content_lines;
     unsigned int cursor_x = 0, cursor_y = 0;
     bool cursor_is_beyond_content = false;
+    unsigned int lines_after_cursor_before_resize = self->lines - self->cursor->y;
 #define setup_cursor() { \
         cursor_x = x; cursor_y = y; \
         cursor_is_beyond_content = num_content_lines_before > 0 && self->cursor->y >= num_content_lines_before; \
@@ -284,10 +291,6 @@ screen_resize(Screen *self, unsigned int lines, unsigned int columns) {
     if (n == NULL) return false;
 
 
-    int lines_to_fill = -1;
-    if (is_main && OPT(scrollback_fill_enlarged_window)) {
-        lines_to_fill = (lines - self->main_linebuf->ynum) + linebuf_continued_lines_count(self->main_linebuf, self->cursor->y + 1);
-    }
     Py_CLEAR(self->main_linebuf); self->main_linebuf = n;
     if (is_main) setup_cursor();
     grman_resize(self->main_grman, self->lines, lines, self->columns, columns);
@@ -323,10 +326,9 @@ screen_resize(Screen *self, unsigned int lines, unsigned int columns) {
         self->cursor->y = num_content_lines;
         if (self->cursor->y >= self->lines) { self->cursor->y = self->lines - 1; screen_index(self); }
     }
-    if (lines_to_fill > 0) {
-        lines_to_fill -= linebuf_continued_lines_count(self->main_linebuf, self->cursor->y + 1);
+    if (is_main && OPT(scrollback_fill_enlarged_window)) {
         const unsigned int top = 0, bottom = self->lines-1;
-        while (lines_to_fill-- > 0) {
+        while (self->cursor->y + 1 < self->lines && self->lines - self->cursor->y > lines_after_cursor_before_resize) {
             if (!historybuf_pop_line(self->historybuf, self->alt_linebuf->line)) break;
             INDEX_DOWN;
             linebuf_copy_line_to(self->main_linebuf, self->alt_linebuf->line, 0);
@@ -622,7 +624,7 @@ screen_draw_overlay_text(Screen *self, const char *utf8_text) {
     self->overlay_line.ynum = self->cursor->y;
     self->overlay_line.xstart = self->cursor->x;
     self->overlay_line.xnum = 0;
-    uint32_t codepoint = 0, state = UTF8_ACCEPT;
+    uint32_t codepoint = 0; UTF8State state = UTF8_ACCEPT;
     bool orig_line_wrap_mode = self->modes.mDECAWM;
     self->modes.mDECAWM = false;
     self->cursor->reverse ^= true;
@@ -1978,7 +1980,7 @@ text_for_range(Screen *self, const Selection *sel, bool insert_newlines) {
         Line *line = range_line_(self, y);
         XRange xr = xrange_for_iteration(&idata, y, line);
         char leading_char = (i > 0 && insert_newlines && !line->continued) ? '\n' : 0;
-        PyObject *text = unicode_in_range(line, xr.x, xr.x_limit, true, leading_char);
+        PyObject *text = unicode_in_range(line, xr.x, xr.x_limit, true, leading_char, false);
         if (text == NULL) { Py_DECREF(ans); return PyErr_NoMemory(); }
         PyTuple_SET_ITEM(ans, i, text);
     }
@@ -2349,6 +2351,15 @@ clear_selection_(Screen *s, PyObject *args UNUSED) {
     Py_RETURN_NONE;
 }
 
+static PyObject*
+resize(Screen *self, PyObject *args) {
+    unsigned int a=1, b=1;
+    if(!PyArg_ParseTuple(args, "|II", &a, &b)) return NULL;
+    screen_resize(self, a, b);
+    if (PyErr_Occurred()) return NULL;
+    Py_RETURN_NONE;
+}
+
 WRAP0x(index)
 WRAP0(reverse_index)
 WRAP0(reset)
@@ -2358,7 +2369,6 @@ WRAP0(backspace)
 WRAP0(tab)
 WRAP0(linefeed)
 WRAP0(carriage_return)
-WRAP2(resize, 1, 1)
 WRAP2(set_margins, 1, 1)
 WRAP0(rescale_images)
 

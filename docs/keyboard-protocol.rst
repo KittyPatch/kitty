@@ -53,7 +53,7 @@ text, or using the following escape codes, for those keys that do not produce
 text (``CSI`` is the bytes ``0x1b 0x5b``)::
 
     CSI number ; modifiers [u~]
-    CSI 1; modifiers [ABCDFHPQRS]
+    CSI 1; modifiers [ABCDEFHPQRS]
     0x0d - for the Enter key
     0x7f or 0x08 - for Backspace
     0x09 - for Tab
@@ -67,7 +67,7 @@ modifiers pressed for the key event. The encoding is described in the
 The second form is used for a few functional keys, such as the :kbd:`Home, End,
 Arrow keys and F1-F4`, they are enumerated in the :ref:`functional` table below.
 Note that if no modifiers are present the parameters are omitted entirely
-giving an escape code of the form ``CSI [ABCDFHPQRS]``.
+giving an escape code of the form ``CSI [ABCDEFHPQRS]``.
 
 If you want support for more advanced features such as repeat and release
 events, alternate keys for shortcut matching et cetera, these can be turned on
@@ -140,14 +140,20 @@ sub-field for the shifted key, like this::
 Modifiers
 ~~~~~~~~~~~~~~
 
-This protocol supports four modifier keys, :kbd:`shift, alt, ctrl and super`.
-Here super is either the *Windows/Linux* key or the *Cmd* key on mac keyboards.
-Modifiers are encoded as a bit field with::
+This protocol supports six modifier keys, :kbd:`shift, alt, ctrl, super, hyper
+and meta` as well as :kbd:`num_lock and caps_lock`. Here :kbd:`super` is either
+the *Windows/Linux* key or the *Cmd* key on mac keyboards. :kbd:`hyper` and
+:kbd:`meta` are typically present only on X11 based systems with special XKB
+rules. Modifiers are encoded as a bit field with::
 
-    shift 0b1     (1)
-    alt   0b10    (2)
-    ctrl  0b100   (4)
-    super 0b1000  (8)
+    shift     0b1         (1)
+    alt       0b10        (2)
+    ctrl      0b100       (4)
+    super     0b1000      (8)
+    hyper     0b10000     (16)
+    meta      0b100000    (32)
+    caps_lock 0b1000000   (64)
+    num_lock  0b10000000  (128)
 
 In the escape code, the modifier value is encoded as a decimal number which is
 ``1 + actual modifiers``. So to represent :kbd:`shift` only, the value would be ``1 +
@@ -286,7 +292,7 @@ With this flag turned on, all key events that do not generate text are
 represented in one of the following two forms::
 
     CSI number; modifier u
-    CSI 1; modifier [~ABCDFHPQRS]
+    CSI 1; modifier [~ABCDEFHPQRS]
 
 This makes it very easy to parse key events in an application. In particular,
 :kbd:`ctrl+c` will no longer generate the ``SIGINT`` signal, but instead be
@@ -377,8 +383,8 @@ Legacy functional keys
 These keys are encoded using three schemes::
 
     CSI number ; modifier ~
-    CSI 1 ; modifier {ABCDFHPQRS}
-    SS3 {ABCDFHPQRS}
+    CSI 1 ; modifier {ABCDEFHPQRS}
+    SS3 {ABCDEFHPQRS}
 
 In the above, if there are no modifiers, the modifier parameter is omitted.
 The modifier value is encoded as described in the :ref:`modifiers` section,
@@ -533,19 +539,21 @@ compatibility reasons.
    "KP_DOWN", "``57420 u``", "KP_PAGE_UP", "``57421 u``"
    "KP_PAGE_DOWN", "``57422 u``", "KP_HOME", "``57423 u``"
    "KP_END", "``57424 u``", "KP_INSERT", "``57425 u``"
-   "KP_DELETE", "``57426 u``", "MEDIA_PLAY", "``57427 u``"
-   "MEDIA_PAUSE", "``57428 u``", "MEDIA_PLAY_PAUSE", "``57429 u``"
-   "MEDIA_REVERSE", "``57430 u``", "MEDIA_STOP", "``57431 u``"
-   "MEDIA_FAST_FORWARD", "``57432 u``", "MEDIA_REWIND", "``57433 u``"
-   "MEDIA_TRACK_NEXT", "``57434 u``", "MEDIA_TRACK_PREVIOUS", "``57435 u``"
-   "MEDIA_RECORD", "``57436 u``", "LOWER_VOLUME", "``57437 u``"
-   "RAISE_VOLUME", "``57438 u``", "MUTE_VOLUME", "``57439 u``"
-   "LEFT_SHIFT", "``57440 u``", "LEFT_CONTROL", "``57441 u``"
-   "LEFT_ALT", "``57442 u``", "LEFT_SUPER", "``57443 u``"
-   "LEFT_HYPER", "``57444 u``", "RIGHT_SHIFT", "``57445 u``"
-   "RIGHT_CONTROL", "``57446 u``", "RIGHT_ALT", "``57447 u``"
-   "RIGHT_SUPER", "``57448 u``", "RIGHT_HYPER", "``57449 u``"
-   "ISO_LEVEL3_SHIFT", "``57450 u``", "ISO_LEVEL5_SHIFT", "``57451 u``"
+   "KP_DELETE", "``57426 u``", "KP_BEGIN", "``1 E or 57427 ~``"
+   "MEDIA_PLAY", "``57428 u``", "MEDIA_PAUSE", "``57429 u``"
+   "MEDIA_PLAY_PAUSE", "``57430 u``", "MEDIA_REVERSE", "``57431 u``"
+   "MEDIA_STOP", "``57432 u``", "MEDIA_FAST_FORWARD", "``57433 u``"
+   "MEDIA_REWIND", "``57434 u``", "MEDIA_TRACK_NEXT", "``57435 u``"
+   "MEDIA_TRACK_PREVIOUS", "``57436 u``", "MEDIA_RECORD", "``57437 u``"
+   "LOWER_VOLUME", "``57438 u``", "RAISE_VOLUME", "``57439 u``"
+   "MUTE_VOLUME", "``57440 u``", "LEFT_SHIFT", "``57441 u``"
+   "LEFT_CONTROL", "``57442 u``", "LEFT_ALT", "``57443 u``"
+   "LEFT_SUPER", "``57444 u``", "LEFT_HYPER", "``57445 u``"
+   "LEFT_META", "``57446 u``", "RIGHT_SHIFT", "``57447 u``"
+   "RIGHT_CONTROL", "``57448 u``", "RIGHT_ALT", "``57449 u``"
+   "RIGHT_SUPER", "``57450 u``", "RIGHT_HYPER", "``57451 u``"
+   "RIGHT_META", "``57452 u``", "ISO_LEVEL3_SHIFT", "``57453 u``"
+   "ISO_LEVEL5_SHIFT", "``57454 u``"
 
 .. end functional key table
 .. }}}

@@ -7,7 +7,7 @@ import os
 import shutil
 import sys
 from contextlib import contextmanager, suppress
-from typing import Dict, Generator, List, Mapping, Optional, Sequence
+from typing import Dict, Generator, List, Optional, Sequence
 
 from .borders import load_borders_program
 from .boss import Boss
@@ -32,8 +32,8 @@ from .os_window_size import initial_window_size_func
 from .session import get_os_window_sizing_data
 from .types import SingleKey
 from .utils import (
-    detach, expandvars, find_exe, log_error, read_shell_environment,
-    single_instance, startup_notification_handler, unix_socket_paths
+    detach, expandvars, log_error, single_instance,
+    startup_notification_handler, unix_socket_paths
 )
 from .window import load_shader_programs
 
@@ -93,14 +93,14 @@ def load_all_shaders(semi_transparent: bool = False) -> None:
     load_borders_program()
 
 
-def init_glfw_module(glfw_module: str, debug_keyboard: bool = False) -> None:
-    if not glfw_init(glfw_path(glfw_module), debug_keyboard):
+def init_glfw_module(glfw_module: str, debug_keyboard: bool = False, debug_rendering: bool = False) -> None:
+    if not glfw_init(glfw_path(glfw_module), debug_keyboard, debug_rendering):
         raise SystemExit('GLFW initialization failed')
 
 
-def init_glfw(opts: OptionsStub, debug_keyboard: bool = False) -> str:
+def init_glfw(opts: OptionsStub, debug_keyboard: bool = False, debug_rendering: bool = False) -> str:
     glfw_module = 'cocoa' if is_macos else ('wayland' if is_wayland(opts) else 'x11')
-    init_glfw_module(glfw_module, debug_keyboard)
+    init_glfw_module(glfw_module, debug_keyboard, debug_rendering)
     return glfw_module
 
 
@@ -225,39 +225,6 @@ def macos_cmdline(argv_args: List[str]) -> List[str]:
     return ans
 
 
-def resolve_editor_cmd(editor: str, shell_env: Mapping[str, str]) -> Optional[str]:
-    import shlex
-    editor_cmd = shlex.split(editor)
-    editor_exe = (editor_cmd or ('',))[0]
-    if editor_exe and os.path.isabs(editor_exe):
-        return editor
-    if not editor_exe:
-        return None
-
-    def patched(exe: str) -> str:
-        editor_cmd[0] = exe
-        return ' '.join(map(shlex.quote, editor_cmd))
-
-    if shell_env is os.environ:
-        q = find_exe(editor_exe)
-        if q:
-            return patched(q)
-    elif 'PATH' in shell_env:
-        import shlex
-        q = shutil.which(editor_exe, path=shell_env['PATH'])
-        if q:
-            return patched(q)
-
-
-def get_editor_from_env(shell_env: Mapping[str, str]) -> Optional[str]:
-    for var in ('VISUAL', 'EDITOR'):
-        editor = shell_env.get(var)
-        if editor:
-            editor = resolve_editor_cmd(editor, shell_env)
-            if editor:
-                return editor
-
-
 def expand_listen_on(listen_on: str, from_config_file: bool) -> str:
     listen_on = expandvars(listen_on)
     if '{kitty_pid}' not in listen_on and from_config_file:
@@ -275,15 +242,6 @@ def expand_listen_on(listen_on: str, from_config_file: bool) -> str:
 
 
 def setup_environment(opts: OptionsStub, cli_opts: CLIOptions) -> None:
-    if opts.editor == '.':
-        editor = get_editor_from_env(os.environ)
-        if not editor:
-            shell_env = read_shell_environment(opts)
-            editor = get_editor_from_env(shell_env)
-        if editor:
-            os.environ['EDITOR'] = editor
-    else:
-        os.environ['EDITOR'] = opts.editor
     from_config_file = False
     if not cli_opts.listen_on and opts.listen_on.startswith('unix:'):
         cli_opts.listen_on = opts.listen_on
@@ -355,7 +313,7 @@ def _main() -> None:
             return
     bad_lines: List[BadLine] = []
     opts = create_opts(cli_opts, accumulate_bad_lines=bad_lines)
-    init_glfw(opts, cli_opts.debug_keyboard)
+    init_glfw(opts, cli_opts.debug_keyboard, cli_opts.debug_rendering)
     setup_environment(opts, cli_opts)
     try:
         with setup_profiling(cli_opts):

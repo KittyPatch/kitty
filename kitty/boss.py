@@ -214,7 +214,7 @@ class Boss:
         self.os_window_map[os_window_id] = tm
         return os_window_id
 
-    def list_os_windows(self) -> Generator[OSWindowDict, None, None]:
+    def list_os_windows(self, self_window: Optional[Window] = None) -> Generator[OSWindowDict, None, None]:
         with cached_process_data():
             active_tab, active_window = self.active_tab, self.active_window
             active_tab_manager = self.active_tab_manager
@@ -223,7 +223,7 @@ class Boss:
                     'id': os_window_id,
                     'platform_window_id': platform_window_id(os_window_id),
                     'is_focused': tm is active_tab_manager,
-                    'tabs': list(tm.list_tabs(active_tab, active_window)),
+                    'tabs': list(tm.list_tabs(active_tab, active_window, self_window)),
                     'wm_class': tm.wm_class,
                     'wm_name': tm.wm_name
                 }
@@ -866,7 +866,7 @@ class Boss:
         confpath = prepare_config_file_for_editing()
         # On macOS vim fails to handle SIGWINCH if it occurs early, so add a
         # small delay.
-        cmd = [kitty_exe(), '+runpy', 'import os, sys, time; time.sleep(0.05); os.execvp(sys.argv[1], sys.argv[1:])'] + get_editor() + [confpath]
+        cmd = [kitty_exe(), '+runpy', 'import os, sys, time; time.sleep(0.05); os.execvp(sys.argv[1], sys.argv[1:])'] + get_editor(self.opts) + [confpath]
         self.new_os_window(*cmd)
 
     def get_output(self, source_window: Window, num_lines: Optional[int] = 1) -> str:

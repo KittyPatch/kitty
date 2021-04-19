@@ -6,21 +6,17 @@
  */
 
 #include "fonts.h"
+#include "cleanup.h"
 #include "state.h"
 #include <math.h>
 #include <structmember.h>
 #include <ft2build.h>
 #include <hb-ft.h>
 
-#if HB_VERSION_MAJOR > 1 || (HB_VERSION_MAJOR == 1 && (HB_VERSION_MINOR > 6 || (HB_VERSION_MINOR == 6 && HB_VERSION_MICRO >= 3)))
-#define HARFBUZZ_HAS_CHANGE_FONT
-#endif
-
 #if FREETYPE_MAJOR == 2 && FREETYPE_MINOR < 7
 #define FT_Bitmap_Init FT_Bitmap_New
 #endif
 
-#include FT_FREETYPE_H
 #include FT_BITMAP_H
 #include FT_TRUETYPE_TABLES_H
 typedef struct {
@@ -76,6 +72,9 @@ set_freetype_error(const char* prefix, int err_code) {
 }
 
 static FT_Library  library;
+
+FT_Library
+freetype_library(void) { return library; }
 
 static inline int
 font_units_to_pixels_y(Face *self, int x) {
@@ -150,17 +149,7 @@ set_font_size(Face *self, FT_F26Dot6 char_width, FT_F26Dot6 char_height, FT_UInt
             return set_font_size(self, 0, h, xdpi, ydpi, 0, cell_height);
         }
         self->char_width = char_width; self->char_height = char_height; self->xdpi = xdpi; self->ydpi = ydpi;
-        if (self->harfbuzz_font != NULL) {
-#ifdef HARFBUZZ_HAS_CHANGE_FONT
-            hb_ft_font_changed(self->harfbuzz_font);
-#else
-            hb_font_set_scale(
-                self->harfbuzz_font,
-                (int) (((uint64_t) self->face->size->metrics.x_scale * (uint64_t) self->face->units_per_EM + (1u<<15)) >> 16),
-                (int) (((uint64_t) self->face->size->metrics.y_scale * (uint64_t) self->face->units_per_EM + (1u<<15)) >> 16)
-            );
-#endif
-        }
+        if (self->harfbuzz_font != NULL) hb_ft_font_changed(self->harfbuzz_font);
     } else {
         if (!self->is_scalable && self->face->num_fixed_sizes > 0) {
             int32_t min_diff = INT32_MAX;
@@ -250,6 +239,15 @@ face_from_descriptor(PyObject *descriptor, FONTS_DATA_HANDLE fg) {
         if (!init_ft_face(self, PyDict_GetItemString(descriptor, "path"), hinting, hint_style, fg)) { Py_CLEAR(self); return NULL; }
     }
     return (PyObject*)self;
+}
+
+FT_Face
+native_face_from_path(const char *path, int index) {
+    int error;
+    FT_Face ans;
+    error = FT_New_Face(library, path, index, &ans);
+    if (error) { set_freetype_error("Failed to load face, with error:", error); return NULL; }
+    return ans;
 }
 
 PyObject*
@@ -408,6 +406,22 @@ populate_processed_bitmap(FT_GlyphSlotRec *slot, FT_Bitmap *bitmap, ProcessedBit
     ans->bitmap_top = slot->bitmap_top; ans->bitmap_left = slot->bitmap_left;
 }
 
+bool
+freetype_convert_mono_bitmap(FT_Bitmap *src, FT_Bitmap *dest) {
+    FT_Bitmap_Init(dest);
+    // This also sets pixel_mode to FT_PIXEL_MODE_GRAY so we don't have to
+    int error = FT_Bitmap_Convert(library, src, dest, 1);
+    if (error) { set_freetype_error("Failed to convert bitmap, with error:", error); return false; }
+    // Normalize gray levels to the range [0..255]
+    dest->num_grays = 256;
+    unsigned int stride = dest->pitch < 0 ? -dest->pitch : dest->pitch;
+    for (unsigned i = 0; i < (unsigned)dest->rows; ++i) {
+        // We only have 2 levels
+        for (unsigned j = 0; j < (unsigned)dest->width; ++j) dest->buffer[i * stride + j] *= 255;
+    }
+    return true;
+}
+
 static inline bool
 render_bitmap(Face *self, int glyph_id, ProcessedBitmap *ans, unsigned int cell_width, unsigned int cell_height, unsigned int num_cells, bool bold, bool italic, bool rescale, FONTS_DATA_HANDLE fg) {
     if (!load_glyph(self, glyph_id, FT_LOAD_RENDER)) return false;
@@ -416,19 +430,7 @@ render_bitmap(Face *self, int glyph_id, ProcessedBitmap *ans, unsigned int cell_
     // Embedded bitmap glyph?
     if (self->face->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_MONO) {
         FT_Bitmap bitmap;
-        FT_Bitmap_Init(&bitmap);
-
-        // This also sets pixel_mode to FT_PIXEL_MODE_GRAY so we don't have to
-        int error = FT_Bitmap_Convert(library, &self->face->glyph->bitmap, &bitmap, 1);
-        if (error) { set_freetype_error("Failed to convert bitmap, with error:", error); return false; }
-
-        // Normalize gray levels to the range [0..255]
-        bitmap.num_grays = 256;
-        unsigned int stride = bitmap.pitch < 0 ? -bitmap.pitch : bitmap.pitch;
-        for (unsigned i = 0; i < (unsigned)bitmap.rows; ++i) {
-            // We only have 2 levels
-            for (unsigned j = 0; j < (unsigned)bitmap.width; ++j) bitmap.buffer[i * stride + j] *= 255;
-        }
+        freetype_convert_mono_bitmap(&self->face->glyph->bitmap, &bitmap);
         populate_processed_bitmap(self->face->glyph, &bitmap, ans, true);
         FT_Bitmap_Done(library, &bitmap);
     } else {
@@ -456,36 +458,38 @@ render_bitmap(Face *self, int glyph_id, ProcessedBitmap *ans, unsigned int cell_
     return true;
 }
 
-static void
-downsample_bitmap(ProcessedBitmap *bm, unsigned int width, unsigned int cell_height) {
+int
+downsample_32bit_image(uint8_t *src, unsigned src_width, unsigned src_height, unsigned src_stride, uint8_t *dest, unsigned dest_width, unsigned dest_height) {
     // Downsample using a simple area averaging algorithm. Could probably do
     // better with bi-cubic or lanczos, but at these small sizes I don't think
     // it matters
-    float ratio = MAX((float)bm->width / width, (float)bm->rows / cell_height);
+    float ratio = MAX((float)src_width / dest_width, (float)src_height / dest_height);
     int factor = (int)ceilf(ratio);
-    uint8_t *dest = calloc(4, (size_t)width * cell_height);
-    if (dest == NULL) fatal("Out of memory");
     uint8_t *d = dest;
-
-    for (unsigned int i = 0, sr = 0; i < cell_height; i++, sr += factor) {
-        for (unsigned int j = 0, sc = 0; j < width; j++, sc += factor, d += 4) {
-
+    for (unsigned int i = 0, sr = 0; i < dest_height; i++, sr += factor) {
+        for (unsigned int j = 0, sc = 0; j < dest_width; j++, sc += factor, d += 4) {
             // calculate area average
             unsigned int r=0, g=0, b=0, a=0, count=0;
-            for (unsigned int y=sr; y < MIN(sr + factor, bm->rows); y++) {
-                uint8_t *p = bm->buf + (y * bm->stride) + sc * 4;
-                for (unsigned int x=sc; x < MIN(sc + factor, bm->width); x++, count++) {
+            for (unsigned int y=sr; y < MIN(sr + factor, src_height); y++) {
+                uint8_t *p = src + (y * src_stride) + sc * 4;
+                for (unsigned int x=sc; x < MIN(sc + factor, src_width); x++, count++) {
                     b += *(p++); g += *(p++); r += *(p++); a += *(p++);
                 }
             }
             if (count) {
                 d[0] = b / count; d[1] = g / count; d[2] = r / count; d[3] = a / count;
             }
-
         }
     }
+    return factor;
+}
+
+static void
+downsample_bitmap(ProcessedBitmap *bm, unsigned int width, unsigned int cell_height) {
+    uint8_t *dest = calloc(4, (size_t)width * cell_height);
+    if (dest == NULL) fatal("Out of memory");
+    bm->factor = downsample_32bit_image(bm->buf, bm->width, bm->rows, bm->stride, dest, width, cell_height);
     bm->buf = dest; bm->needs_free = true; bm->stride = 4 * width; bm->width = width; bm->rows = cell_height;
-    bm->factor = factor;
 }
 
 static inline void
@@ -500,8 +504,7 @@ detect_right_edge(ProcessedBitmap *ans) {
 }
 
 static inline bool
-render_color_bitmap(Face *self, int glyph_id, ProcessedBitmap *ans, unsigned int cell_width, unsigned int cell_height, unsigned int num_cells, unsigned int baseline) {
-    (void)baseline;
+render_color_bitmap(Face *self, int glyph_id, ProcessedBitmap *ans, unsigned int cell_width, unsigned int cell_height, unsigned int num_cells, unsigned int baseline UNUSED) {
     unsigned short best = 0, diff = USHRT_MAX;
     const short limit = self->face->num_fixed_sizes;
     for (short i = 0; i < limit; i++) {
@@ -737,10 +740,7 @@ init_freetype_library(PyObject *m) {
         set_freetype_error("Failed to initialize FreeType library, with error:", error);
         return false;
     }
-    if (Py_AtExit(free_freetype) != 0) {
-        PyErr_SetString(FreeType_Exception, "Failed to register the freetype library at exit handler");
-        return false;
-    }
+    register_at_exit_cleanup_func(FREETYPE_CLEANUP_FUNC, free_freetype);
     return true;
 }
 
