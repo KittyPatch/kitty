@@ -21,9 +21,9 @@ from .constants import (
     is_wayland, kitty_exe, logo_png_file, running_in_kitty
 )
 from .fast_data_types import (
-    GLFW_IBEAM_CURSOR, create_os_window, free_font_data, glfw_init,
-    glfw_terminate, load_png_data, set_custom_cursor, set_default_window_icon,
-    set_options
+    GLFW_IBEAM_CURSOR, GLFW_MOD_ALT, GLFW_MOD_SHIFT, create_os_window,
+    free_font_data, glfw_init, glfw_terminate, load_png_data,
+    set_custom_cursor, set_default_window_icon, set_options
 )
 from .fonts.box_drawing import set_scale
 from .fonts.render import set_font_family
@@ -112,9 +112,14 @@ def get_macos_shortcut_for(opts: OptionsStub, function: str = 'new_os_window') -
             candidates.append(k)
     if candidates:
         from .fast_data_types import cocoa_set_global_shortcut
-
+        alt_mods = GLFW_MOD_ALT, GLFW_MOD_ALT | GLFW_MOD_SHIFT
         # Reverse list so that later defined keyboard shortcuts take priority over earlier defined ones
         for candidate in reversed(candidates):
+            if candidate.mods in alt_mods:
+                # Option based shortcuts dont work in the global menubar,
+                # presumably because Apple reserves them for IME, see
+                # https://github.com/kovidgoyal/kitty/issues/3515
+                continue
             if cocoa_set_global_shortcut(function, candidate[0], candidate[2]):
                 ans = candidate
                 break
@@ -301,6 +306,9 @@ def _main() -> None:
         create_opts(cli_opts, debug_config=True)
         return
     if cli_opts.detach:
+        if cli_opts.session == '-':
+            from .session import PreReadSession
+            cli_opts.session = PreReadSession(sys.stdin.read())
         detach()
     if cli_opts.replay_commands:
         from kitty.client import main as client_main

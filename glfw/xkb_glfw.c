@@ -324,8 +324,14 @@ glfw_xkb_update_masks(_GLFWXKBData *xkb) {
     unsigned used_bits = 0; /* To avoid using the same bit twice */
     XkbDescPtr xkb_ptr = XkbGetMap( _glfw.x11.display, XkbVirtualModsMask | XkbVirtualModMapMask, XkbUseCoreKbd );
 
+    /* shift, control, and capsLock are special; they cannot be identified reliably on X11 */
+#define S(a, n) xkb->a##Idx = xkb_keymap_mod_get_index(xkb->keymap, n); xkb->a##Mask = 1 << xkb->a##Idx; used_bits |= xkb->a##Mask;
+    S(control, XKB_MOD_NAME_CTRL);
+    S(shift, XKB_MOD_NAME_SHIFT);
+    S(capsLock, XKB_MOD_NAME_CAPS);
+#undef S
 #define S( a ) xkb->a##Idx = XKB_MOD_INVALID; xkb->a##Mask = 0
-    S(control); S(alt); S(shift); S(super); S(hyper); S(meta); S(capsLock); S(numLock);
+    S(alt); S(super); S(hyper); S(meta); S(numLock);
 #undef S
     if (xkb_ptr) {
         Status status = XkbGetNames(_glfw.x11.display, XkbVirtualModNamesMask, xkb_ptr);
@@ -361,9 +367,6 @@ glfw_xkb_update_masks(_GLFWXKBData *xkb) {
         }
     }
 #define S(a, n) xkb->a##Idx = xkb_keymap_mod_get_index(xkb->keymap, n); xkb->a##Mask = 1 << xkb->a##Idx;
-    S(control, XKB_MOD_NAME_CTRL);
-    S(shift, XKB_MOD_NAME_SHIFT);
-    S(capsLock, XKB_MOD_NAME_CAPS);
     if (!succeeded) {
         S(numLock, XKB_MOD_NAME_NUM);
         S(alt, XKB_MOD_NAME_ALT);
@@ -699,6 +702,11 @@ glfw_xkb_key_from_ime(_GLFWIBUSKeyEvent *ev, bool handled_by_ime, bool failed) {
       last_handled_press_keycode = ev->glfw_ev.native_key;
 }
 
+static bool
+is_switch_layout_key(xkb_keysym_t xkb_sym) {
+    return xkb_sym == XKB_KEY_ISO_First_Group || xkb_sym == XKB_KEY_ISO_Last_Group || xkb_sym == XKB_KEY_ISO_Next_Group || xkb_sym == XKB_KEY_ISO_Prev_Group || xkb_sym == XKB_KEY_Mode_switch;
+}
+
 void
 glfw_xkb_handle_key_event(_GLFWwindow *window, _GLFWXKBData *xkb, xkb_keycode_t xkb_keycode, int action) {
     static char key_text[64] = {0};
@@ -742,7 +750,7 @@ glfw_xkb_handle_key_event(_GLFWwindow *window, _GLFWXKBData *xkb, xkb_keycode_t 
             xkb_mod_mask_t consumed_unknown_mods = xkb_state_key_get_consumed_mods(sg->state, code_for_sym) & sg->activeUnknownModifiers;
             if (sg->activeUnknownModifiers) debug("%s", format_xkb_mods(xkb, "active_unknown_mods", sg->activeUnknownModifiers));
             if (consumed_unknown_mods) { debug("%s", format_xkb_mods(xkb, "consumed_unknown_mods", consumed_unknown_mods)); }
-            else xkb_sym = clean_syms[0];
+            else if (!is_switch_layout_key(xkb_sym)) xkb_sym = clean_syms[0];
             // xkb returns text even if alt and/or super are pressed
             if ( ((GLFW_MOD_CONTROL | GLFW_MOD_ALT | GLFW_MOD_SUPER | GLFW_MOD_HYPER | GLFW_MOD_META) & sg->modifiers) == 0) {
               xkb_state_key_get_utf8(sg->state, code_for_sym, key_text, sizeof(key_text));
@@ -754,9 +762,7 @@ glfw_xkb_handle_key_event(_GLFWwindow *window, _GLFWXKBData *xkb, xkb_keycode_t 
         }
         if (key_text[0]) { debug("%s: %s ", text_type, key_text); }
     }
-    if (xkb_sym == XKB_KEY_ISO_First_Group || xkb_sym == XKB_KEY_ISO_Last_Group || xkb_sym == XKB_KEY_ISO_Next_Group || xkb_sym == XKB_KEY_ISO_Prev_Group || xkb_sym == XKB_KEY_Mode_switch) {
-      return;
-    }
+    if (is_switch_layout_key(xkb_sym)) { debug(" is a keyboard layout shift key, ignoring.\n"); return; }
     if (sg->modifiers & GLFW_MOD_NUM_LOCK && XKB_KEY_KP_Space <= xkb_sym && xkb_sym <= XKB_KEY_KP_9) {
         xkb_sym = xkb_state_key_get_one_sym(sg->state, code_for_sym);
     }

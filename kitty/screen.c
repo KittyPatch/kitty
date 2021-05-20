@@ -571,6 +571,7 @@ screen_draw(Screen *self, uint32_t och, bool from_input_stream) {
     if (is_ignored_char(och)) return;
     if (!self->has_activity_since_last_focus && !self->has_focus) {
         self->has_activity_since_last_focus = true;
+        CALLBACK("on_activity_since_last_focus", NULL);
     }
     uint32_t ch = och < 256 ? self->g_charset[och] : och;
     bool is_cc = is_combining_char(ch);
@@ -773,9 +774,11 @@ void
 screen_toggle_screen_buffer(Screen *self, bool save_cursor, bool clear_alt_screen) {
     bool to_alt = self->linebuf == self->main_linebuf;
     self->active_hyperlink_id = 0;
-    grman_clear(self->alt_grman, true, self->cell_size);  // always clear the alt buffer graphics to free up resources, since it has to be cleared when switching back to it anyway
     if (to_alt) {
-        if (clear_alt_screen) linebuf_clear(self->alt_linebuf, BLANK_CHAR);
+        if (clear_alt_screen) {
+            linebuf_clear(self->alt_linebuf, BLANK_CHAR);
+            grman_clear(self->alt_grman, true, self->cell_size);
+        }
         if (save_cursor) screen_save_cursor(self);
         self->linebuf = self->alt_linebuf;
         self->tabstops = self->alt_tabstops;
@@ -1134,15 +1137,28 @@ screen_reverse_index(Screen *self) {
     } else screen_cursor_up(self, 1, false, -1);
 }
 
-void
-screen_reverse_scroll(Screen *self, unsigned int count) {
+static void
+_reverse_scroll(Screen *self, unsigned int count, bool fill_from_scrollback) {
     // Scroll the screen down by count lines, not moving the cursor
     count = MIN(self->lines, count);
     unsigned int top = self->margin_top, bottom = self->margin_bottom;
-    while (count > 0) {
-        count--;
+    fill_from_scrollback = fill_from_scrollback && self->linebuf == self->main_linebuf;
+    while (count-- > 0) {
+        bool copied = false;
+        if (fill_from_scrollback) copied = historybuf_pop_line(self->historybuf, self->alt_linebuf->line);
         INDEX_DOWN;
+        if (copied) linebuf_copy_line_to(self->main_linebuf, self->alt_linebuf->line, 0);
     }
+}
+
+void
+screen_reverse_scroll(Screen *self, unsigned int count) {
+    _reverse_scroll(self, count, false);
+}
+
+void
+screen_reverse_scroll_and_fill_from_scrollback(Screen *self, unsigned int count) {
+    _reverse_scroll(self, count, true);
 }
 
 
@@ -2886,6 +2902,15 @@ hyperlink_at(Screen *self, PyObject *args) {
     return Py_BuildValue("s", url);
 }
 
+static PyObject*
+reverse_scroll(Screen *self, PyObject *args) {
+    int fill_from_scrollback = 0;
+    unsigned int amt;
+    if (!PyArg_ParseTuple(args, "I|p", &amt, &fill_from_scrollback)) return NULL;
+    _reverse_scroll(self, amt, fill_from_scrollback);
+    Py_RETURN_NONE;
+}
+
 #define MND(name, args) {#name, (PyCFunction)name, args, #name},
 #define MODEFUNC(name) MND(name, METH_NOARGS) MND(set_##name, METH_O)
 
@@ -2909,6 +2934,7 @@ static PyMethodDef methods[] = {
     MND(hyperlinks_as_list, METH_NOARGS)
     MND(garbage_collect_hyperlink_pool, METH_NOARGS)
     MND(hyperlink_for_id, METH_O)
+    MND(reverse_scroll, METH_VARARGS)
     METHOD(current_char_width, METH_NOARGS)
     MND(insert_lines, METH_VARARGS)
     MND(delete_lines, METH_VARARGS)

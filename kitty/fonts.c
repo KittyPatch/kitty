@@ -325,33 +325,6 @@ sprite_tracker_current_layout(FONTS_DATA_HANDLE data, unsigned int *x, unsigned 
     *x = fg->sprite_tracker.xnum; *y = fg->sprite_tracker.ynum; *z = fg->sprite_tracker.z;
 }
 
-void
-clear_sprite_map(Font *font) {
-#define CLEAR(s) s->filled = false; s->rendered = false; s->colored = false; s->glyph = 0; zero_at_ptr(&s->extra_glyphs); s->x = 0; s->y = 0; s->z = 0; s->ligature_index = 0;
-    SpritePosition *s;
-    for (size_t i = 0; i < sizeof(font->sprite_map)/sizeof(font->sprite_map[0]); i++) {
-        s = font->sprite_map + i;
-        CLEAR(s);
-        while ((s = s->next)) {
-            CLEAR(s);
-        }
-    }
-#undef CLEAR
-}
-
-void
-clear_special_glyph_cache(Font *font) {
-#define CLEAR(s) s->data = 0; s->glyph = 0;
-    SpecialGlyphCache *s;
-    for (size_t i = 0; i < sizeof(font->special_glyph_cache)/sizeof(font->special_glyph_cache[0]); i++) {
-        s = font->special_glyph_cache + i;
-        CLEAR(s);
-        while ((s = s->next)) {
-            CLEAR(s);
-        }
-    }
-#undef CLEAR
-}
 
 static void
 sprite_tracker_set_layout(GPUSpriteTracker *sprite_tracker, unsigned int cell_width, unsigned int cell_height) {
@@ -602,13 +575,8 @@ START_ALLOW_CASE_RANGE
             return BLANK_FONT;
         case 0x2500 ... 0x2573:
         case 0x2574 ... 0x259f:
-        case 0xe0b0 ... 0xe0b4:
         case 0x2800 ... 0x28ff:
-        case 0xe0b6:
-        case 0xe0b8: // 
-        case 0xe0ba: //   
-        case 0xe0bc: // 
-        case 0xe0be: //   
+        case 0xe0b0 ... 0xe0bf:  // powerline box drawing
         case 0x1fb00 ... 0x1fb8b:  // symbols for legacy computing
         case 0x1fba0 ... 0x1fbae:
             return BOX_FONT;

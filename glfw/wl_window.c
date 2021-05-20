@@ -451,11 +451,11 @@ static void xdgToplevelHandleConfigure(void* data,
     debug("final window content size: %dx%d\n", window->wl.width, window->wl.height);
     _glfwInputWindowFocus(window, window->wl.toplevel_states & TOPLEVEL_STATE_ACTIVATED);
     ensure_csd_resources(window);
+    wl_surface_commit(window->wl.surface);
 #define geometry window->wl.decorations.geometry
     debug("Setting window geometry: x=%d y=%d %dx%d\n", geometry.x, geometry.y, geometry.width, geometry.height);
     xdg_surface_set_window_geometry(window->wl.xdg.surface, geometry.x, geometry.y, geometry.width, geometry.height);
 #undef geometry
-    wl_surface_commit(window->wl.surface);
     if (live_resize_done) _glfwInputLiveResize(window, false);
 }
 
@@ -2000,4 +2000,13 @@ GLFWAPI unsigned long long glfwDBusUserNotify(const char *app_name, const char* 
 
 GLFWAPI void glfwDBusSetUserNotificationHandler(GLFWDBusnotificationactivatedfun handler) {
     glfw_dbus_set_user_notification_activated_handler(handler);
+}
+
+GLFWAPI bool glfwWaylandSetTitlebarColor(GLFWwindow *handle, uint32_t color, bool use_system_color) {
+    _GLFWwindow* window = (_GLFWwindow*) handle;
+    if (!window->wl.decorations.serverSide) {
+        set_titlebar_color(window, color, use_system_color);
+        return true;
+    }
+    return false;
 }

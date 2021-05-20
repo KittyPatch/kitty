@@ -1261,6 +1261,14 @@ def macos_titlebar_color(x: str) -> int:
     return (color_as_int(to_color(x)) << 8) | 2
 
 
+o('wayland_titlebar_color', 'system', option_type=macos_titlebar_color, long_text=_('''
+Change the color of the kitty window's titlebar on Wayland systems with client side window decorations such as GNOME.
+A value of :code:`system` means to use the default system color,
+a value of :code:`background` means to use the background color
+of the currently active window and finally you can use
+an arbitrary color, such as :code:`#12af59` or :code:`red`.
+'''))
+
 o('macos_titlebar_color', 'system', option_type=macos_titlebar_color, long_text=_('''
 Change the color of the kitty window's titlebar on macOS. A value of :code:`system`
 means to use the default system color, a value of :code:`background` means to use
@@ -1296,7 +1304,7 @@ both Option keys as Alt, instead.
 '''))
 
 o('macos_hide_from_tasks', False, long_text=_('''
-Hide the kitty window from running tasks (:kbd:`Option+Tab`) on macOS.
+Hide the kitty window from running tasks (:kbd:`⌘+Tab`) on macOS.
 '''))
 
 o('macos_quit_when_last_window_closed', False, long_text=_('''
