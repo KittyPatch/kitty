@@ -163,7 +163,6 @@ dealloc(ChildMonitor* self) {
     pthread_mutex_destroy(&talk_lock);
     Py_CLEAR(self->dump_callback);
     Py_CLEAR(self->death_notify);
-    Py_TYPE(self)->tp_free((PyObject*)self);
     while (remove_queue_count) {
         remove_queue_count--;
         FREE_CHILD(remove_queue[remove_queue_count]);
@@ -173,6 +172,7 @@ dealloc(ChildMonitor* self) {
         FREE_CHILD(add_queue[add_queue_count]);
     }
     free_loop_data(&self->io_loop_data);
+    Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
 static void
@@ -1499,7 +1499,7 @@ talk_loop(void *data) {
     ChildMonitor *self = (ChildMonitor*)data;
     set_thread_name("KittyPeerMon");
     if (!init_loop_data(&talk_data.loop_data)) { log_error("Failed to create wakeup fd for talk thread with error: %s", strerror(errno)); }
-    PollFD fds[PEER_LIMIT + 8] = {0};
+    PollFD fds[PEER_LIMIT + 8] = {{0}};
     size_t num_listen_fds = 0, num_peer_fds = 0;
 #define add_listener(which) \
     if (self->which > -1) { \

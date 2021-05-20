@@ -761,15 +761,17 @@ ShortcutMap = Dict[Tuple[SingleKey, ...], KeyAction]
 
 def print_shortcut(key_sequence: Iterable[SingleKey], action: KeyAction) -> None:
     from .fast_data_types import (
-        GLFW_MOD_ALT, GLFW_MOD_CONTROL, GLFW_MOD_SHIFT, GLFW_MOD_SUPER,
+        GLFW_MOD_ALT, GLFW_MOD_CAPS_LOCK, GLFW_MOD_CONTROL, GLFW_MOD_HYPER,
+        GLFW_MOD_META, GLFW_MOD_NUM_LOCK, GLFW_MOD_SHIFT, GLFW_MOD_SUPER,
         glfw_get_key_name
     )
-    mmap = {'shift': GLFW_MOD_SHIFT, 'alt': GLFW_MOD_ALT, 'ctrl': GLFW_MOD_CONTROL, ('cmd' if is_macos else 'super'): GLFW_MOD_SUPER}
+    modmap = {'shift': GLFW_MOD_SHIFT, 'alt': GLFW_MOD_ALT, 'ctrl': GLFW_MOD_CONTROL, ('cmd' if is_macos else 'super'): GLFW_MOD_SUPER,
+              'hyper': GLFW_MOD_HYPER, 'meta': GLFW_MOD_META, 'num_lock': GLFW_MOD_NUM_LOCK, 'caps_lock': GLFW_MOD_CAPS_LOCK}
     keys = []
     for key_spec in key_sequence:
         names = []
         mods, is_native, key = key_spec
-        for name, val in mmap.items():
+        for name, val in modmap.items():
             if mods & val:
                 names.append(name)
         if key:
@@ -851,4 +853,11 @@ def create_opts(args: CLIOptions, debug_config: bool = False, accumulate_bad_lin
         if not is_macos:
             print('Running under:', green('Wayland' if is_wayland(opts) else 'X11'))
         compare_opts(opts)
+    return opts
+
+
+def create_default_opts() -> OptionsStub:
+    from .config import load_config
+    config = tuple(resolve_config(SYSTEM_CONF, defconf, ()))
+    opts = load_config(*config)
     return opts

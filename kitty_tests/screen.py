@@ -315,6 +315,12 @@ class TestScreen(BaseTest):
         def assert_lines(*lines):
             return self.ae(lines, tuple(str(s.line(i)) for i in range(s.lines)))
 
+        # test the reverse scroll function
+        s = prepare_screen(map(str, range(6)))
+        assert_lines('2', '3', '4', '5', '')
+        s.reverse_scroll(2, True)
+        assert_lines('0', '1', '2', '3', '4')
+
         # Height increased, width unchanged → pull down lines to fill new space at the top
         s = prepare_screen(map(str, range(6)))
         assert_lines('2', '3', '4', '5', '')
@@ -346,6 +352,15 @@ class TestScreen(BaseTest):
         assert_lines('2', '33333', '33333', '33333', '')
         s.resize(4, 12)
         assert_lines('2', '333333333333', '333', '')
+
+        # Height increased with large continued text
+        s = self.create_screen(options={'scrollback_fill_enlarged_window': True})
+        s.draw(('x' * (s.columns * s.lines * 2)) + 'abcde')
+        s.carriage_return(), s.linefeed()
+        s.draw('>')
+        assert_lines('xxxxx', 'xxxxx', 'xxxxx', 'abcde', '>')
+        s.resize(s.lines + 2, s.columns)
+        assert_lines('xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'abcde', '>')
 
     def test_tab_stops(self):
         # Taken from vttest/main.c
@@ -647,6 +662,13 @@ class TestScreen(BaseTest):
         self.ae(s.marked_cells(), cells(8))
         s.set_marker(marker_from_regex('\t', 3))
         self.ae(s.marked_cells(), cells(*range(8)))
+        s = self.create_screen()
+        s.cursor.x = 2
+        s.draw('x')
+        s.cursor.x += 1
+        s.draw('x')
+        s.set_marker(marker_from_function(mark_x))
+        self.ae(s.marked_cells(), [(2, 0, 1), (4, 0, 2)])
 
     def test_hyperlinks(self):
         s = self.create_screen()

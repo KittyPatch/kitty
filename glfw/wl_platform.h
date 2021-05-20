@@ -53,12 +53,12 @@ typedef VkBool32 (APIENTRY *PFN_vkGetPhysicalDeviceWaylandPresentationSupportKHR
 #include "wl_cursors.h"
 
 #include "wayland-xdg-shell-client-protocol.h"
-#include "wayland-viewporter-client-protocol.h"
 #include "wayland-xdg-decoration-unstable-v1-client-protocol.h"
 #include "wayland-relative-pointer-unstable-v1-client-protocol.h"
 #include "wayland-pointer-constraints-unstable-v1-client-protocol.h"
 #include "wayland-idle-inhibit-unstable-v1-client-protocol.h"
 #include "wayland-primary-selection-unstable-v1-client-protocol.h"
+#include "wl_text_input.h"
 
 #define _glfw_dlopen(name) dlopen(name, RTLD_LAZY | RTLD_LOCAL)
 #define _glfw_dlclose(handle) dlclose(handle)
@@ -88,28 +88,45 @@ typedef void (* PFN_wl_egl_window_resize)(struct wl_egl_window*, int, int, int, 
 #define wl_egl_window_destroy _glfw.wl.egl.window_destroy
 #define wl_egl_window_resize _glfw.wl.egl.window_resize
 
-#define _GLFW_DECORATION_WIDTH 4
-#define _GLFW_DECORATION_TOP 24
-#define _GLFW_DECORATION_VERTICAL (_GLFW_DECORATION_TOP + _GLFW_DECORATION_WIDTH)
-#define _GLFW_DECORATION_HORIZONTAL (2 * _GLFW_DECORATION_WIDTH)
-
 typedef enum _GLFWdecorationSideWayland
 {
-    mainWindow,
-    topDecoration,
-    leftDecoration,
-    rightDecoration,
-    bottomDecoration,
-
+    CENTRAL_WINDOW,
+    TOP_DECORATION,
+    LEFT_DECORATION,
+    RIGHT_DECORATION,
+    BOTTOM_DECORATION,
 } _GLFWdecorationSideWayland;
 
-typedef struct _GLFWdecorationWayland
-{
-    struct wl_surface*          surface;
-    struct wl_subsurface*       subsurface;
-    struct wp_viewport*         viewport;
+typedef struct _GLFWWaylandBufferPair {
+    struct wl_buffer *a, *b, *front, *back;
+    struct { uint8_t *a, *b, *front, *back; } data;
+    bool has_pending_update;
+    size_t size_in_bytes, width, height, stride;
+} _GLFWWaylandBufferPair;
 
-} _GLFWdecorationWayland;
+typedef struct _GLFWWaylandCSDEdge {
+    struct wl_surface *surface;
+    struct wl_subsurface *subsurface;
+    _GLFWWaylandBufferPair buffer;
+    int x, y;
+} _GLFWWaylandCSDEdge;
+
+typedef enum WaylandWindowState {
+
+    TOPLEVEL_STATE_NONE = 0,
+    TOPLEVEL_STATE_MAXIMIZED = 1,
+    TOPLEVEL_STATE_FULLSCREEN = 2,
+	TOPLEVEL_STATE_RESIZING = 4,
+	TOPLEVEL_STATE_ACTIVATED = 8,
+	TOPLEVEL_STATE_TILED_LEFT = 16,
+	TOPLEVEL_STATE_TILED_RIGHT = 32,
+	TOPLEVEL_STATE_TILED_TOP = 64,
+	TOPLEVEL_STATE_TILED_BOTTOM = 128,
+} WaylandWindowState;
+
+
+static const WaylandWindowState TOPLEVEL_STATE_DOCKED = TOPLEVEL_STATE_MAXIMIZED | TOPLEVEL_STATE_FULLSCREEN | TOPLEVEL_STATE_TILED_TOP | TOPLEVEL_STATE_TILED_LEFT | TOPLEVEL_STATE_TILED_RIGHT | TOPLEVEL_STATE_TILED_BOTTOM;
+
 
 // Wayland-specific per-window data
 //
@@ -117,7 +134,6 @@ typedef struct _GLFWwindowWayland
 {
     int                         width, height;
     bool                        visible;
-    bool                        maximized;
     bool                        hovered;
     bool                        transparent;
     struct wl_surface*          surface;
@@ -131,7 +147,7 @@ typedef struct _GLFWwindowWayland
     } xdg;
 
     _GLFWcursor*                currentCursor;
-    double                      cursorPosX, cursorPosY;
+    double                      cursorPosX, cursorPosY, allCursorPosX, allCursorPosY;
 
     char*                       title;
     char                        appId[256];
@@ -151,13 +167,37 @@ typedef struct _GLFWwindowWayland
 
     struct zwp_idle_inhibitor_v1*          idleInhibitor;
 
-    bool                        fullscreened;
-
     struct {
-        bool                               serverSide;
-        struct wl_buffer*                  buffer;
-        _GLFWdecorationWayland             top, left, right, bottom;
-        int                                focus;
+        bool serverSide;
+        _GLFWdecorationSideWayland focus;
+        _GLFWWaylandCSDEdge top, left, right, bottom;
+
+        struct {
+            uint8_t *data;
+            size_t size;
+        } mapping;
+
+        struct {
+            int width, height, scale;
+            bool focused;
+        } for_window_state;
+
+        struct {
+            unsigned int width, top, horizontal, vertical, visible_titlebar_height;
+        } metrics;
+
+        struct {
+            int32_t x, y, width, height;
+        } geometry;
+
+        struct {
+            uint32_t *data;
+            size_t for_decoration_size, stride, segments, corner_size;
+        } shadow_tile;
+        monotonic_t last_click_on_top_decoration_at;
+
+        uint32_t titlebar_color;
+        bool use_custom_titlebar_color;
     } decorations;
 
     struct {
@@ -166,6 +206,12 @@ typedef struct _GLFWwindowWayland
         struct wl_callback *current_wl_callback;
     } frameCallbackData;
 
+    struct {
+        int32_t width, height;
+    } user_requested_content_size;
+
+    uint32_t toplevel_states;
+    bool maximize_on_first_show;
 
 } _GLFWwindowWayland;
 
@@ -208,7 +254,6 @@ typedef struct _GLFWlibraryWayland
     struct wl_data_device*      dataDevice;
     struct xdg_wm_base*         wmBase;
     struct zxdg_decoration_manager_v1*      decorationManager;
-    struct wp_viewporter*       viewporter;
     struct zwp_relative_pointer_manager_v1* relativePointerManager;
     struct zwp_pointer_constraints_v1*      pointerConstraints;
     struct zwp_idle_inhibit_manager_v1*     idleInhibitManager;
@@ -262,7 +307,6 @@ typedef struct _GLFWlibraryWayland
     size_t dataOffersCounter;
     _GLFWWaylandDataOffer dataOffers[8];
     char* primarySelectionString;
-    GLFWWLCursorThemes cursor_themes;
 } _GLFWlibraryWayland;
 
 // Wayland-specific per-monitor data

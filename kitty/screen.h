@@ -83,7 +83,8 @@ typedef struct {
     CellPixelSize cell_size;
     OverlayLine overlay_line;
     id_type window_id;
-    uint32_t utf8_state, utf8_codepoint, *g0_charset, *g1_charset, *g_charset;
+    uint32_t utf8_codepoint, *g0_charset, *g1_charset, *g_charset;
+    UTF8State utf8_state;
     unsigned int current_charset;
     Selections selections, url_ranges;
     struct {
@@ -156,6 +157,7 @@ void screen_reverse_index(Screen *self);
 void screen_index(Screen *self);
 void screen_scroll(Screen *self, unsigned int count);
 void screen_reverse_scroll(Screen *self, unsigned int count);
+void screen_reverse_scroll_and_fill_from_scrollback(Screen *self, unsigned int count);
 void screen_reset(Screen *self);
 void screen_set_tab_stop(Screen *self);
 void screen_tab(Screen *self);

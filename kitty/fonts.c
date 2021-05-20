@@ -10,6 +10,7 @@
 #include "state.h"
 #include "emoji.h"
 #include "unicode-data.h"
+#include "charsets.h"
 
 #define MISSING_GLYPH 4
 #define MAX_NUM_EXTRA_GLYPHS 8u
@@ -324,33 +325,6 @@ sprite_tracker_current_layout(FONTS_DATA_HANDLE data, unsigned int *x, unsigned 
     *x = fg->sprite_tracker.xnum; *y = fg->sprite_tracker.ynum; *z = fg->sprite_tracker.z;
 }
 
-void
-clear_sprite_map(Font *font) {
-#define CLEAR(s) s->filled = false; s->rendered = false; s->colored = false; s->glyph = 0; zero_at_ptr(&s->extra_glyphs); s->x = 0; s->y = 0; s->z = 0; s->ligature_index = 0;
-    SpritePosition *s;
-    for (size_t i = 0; i < sizeof(font->sprite_map)/sizeof(font->sprite_map[0]); i++) {
-        s = font->sprite_map + i;
-        CLEAR(s);
-        while ((s = s->next)) {
-            CLEAR(s);
-        }
-    }
-#undef CLEAR
-}
-
-void
-clear_special_glyph_cache(Font *font) {
-#define CLEAR(s) s->data = 0; s->glyph = 0;
-    SpecialGlyphCache *s;
-    for (size_t i = 0; i < sizeof(font->special_glyph_cache)/sizeof(font->special_glyph_cache[0]); i++) {
-        s = font->special_glyph_cache + i;
-        CLEAR(s);
-        while ((s = s->next)) {
-            CLEAR(s);
-        }
-    }
-#undef CLEAR
-}
 
 static void
 sprite_tracker_set_layout(GPUSpriteTracker *sprite_tracker, unsigned int cell_width, unsigned int cell_height) {
@@ -601,13 +575,8 @@ START_ALLOW_CASE_RANGE
             return BLANK_FONT;
         case 0x2500 ... 0x2573:
         case 0x2574 ... 0x259f:
-        case 0xe0b0 ... 0xe0b4:
         case 0x2800 ... 0x28ff:
-        case 0xe0b6:
-        case 0xe0b8: // 
-        case 0xe0ba: //   
-        case 0xe0bc: // 
-        case 0xe0be: //   
+        case 0xe0b0 ... 0xe0bf:  // powerline box drawing
         case 0x1fb00 ... 0x1fb8b:  // symbols for legacy computing
         case 0x1fba0 ... 0x1fbae:
             return BOX_FONT;
@@ -963,8 +932,10 @@ shape_run(CPUCell *first_cpu_cell, GPUCell *first_gpu_cell, index_type num_cells
         uint32_t num_codepoints_used_by_glyph = 0;
         bool is_last_glyph = G(glyph_idx) == G(num_glyphs) - 1;
         Group *current_group = G(groups) + G(group_idx);
+
         if (is_last_glyph) {
             num_codepoints_used_by_glyph = UINT32_MAX;
+            next_cluster = 0;
         } else {
             next_cluster = G(info)[G(glyph_idx) + 1].cluster;
             // RTL languages like Arabic have decreasing cluster numbers
@@ -977,15 +948,25 @@ shape_run(CPUCell *first_cpu_cell, GPUCell *first_gpu_cell, index_type num_cells
             else add_to_current_group = ligature_type == INFINITE_LIGATURE_MIDDLE || ligature_type == INFINITE_LIGATURE_END || is_empty;
         } else {
             if (is_special) {
-                if (font->spacer_strategy == SPACERS_BEFORE) add_to_current_group = G(prev_was_empty);
+                if (!current_group->num_cells) add_to_current_group = true;
+                else if (font->spacer_strategy == SPACERS_BEFORE) add_to_current_group = G(prev_was_empty);
                 else add_to_current_group = is_empty;
             } else {
-                add_to_current_group = !G(prev_was_special);
+                add_to_current_group = !G(prev_was_special) || !current_group->num_cells;
             }
+        }
+        static const bool debug_grouping = false;
+        if (debug_grouping) {
+            char ch[8] = {0};
+            encode_utf8(G(current_cell_data).current_codepoint, ch);
+            printf("\x1b[32m→ %s\x1b[m glyph_idx: %zu glyph_id: %u (%s) group_idx: %zu cluster: %u -> %u is_special: %d\n"
+                    "  num_codepoints_used_by_glyph: %u current_group: (%u cells, %u glyphs) add_to_current_group: %d\n",
+                    ch, G(glyph_idx), glyph_id, glyph_name, G(group_idx), cluster, next_cluster, is_special,
+                    num_codepoints_used_by_glyph, current_group->num_cells, current_group->num_glyphs, add_to_current_group);
         }
         if (current_group->num_glyphs >= MAX_GLYPHS_IN_GROUP || current_group->num_cells >= MAX_GLYPHS_IN_GROUP) add_to_current_group = false;
 
-        if (!add_to_current_group) { G(group_idx)++; current_group = G(groups) + G(group_idx); }
+        if (!add_to_current_group) { current_group = G(groups) + ++G(group_idx); }
         if (!current_group->num_glyphs++) {
             if (ligature_type == INFINITE_LIGATURE_START || ligature_type == INFINITE_LIGATURE_MIDDLE) current_group->started_with_infinite_ligature = true;
             current_group->first_glyph_idx = G(glyph_idx);

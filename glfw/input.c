@@ -607,6 +607,7 @@ _glfwGetKeyName(int key)
     case GLFW_FKEY_KP_END: return "KP_END";
     case GLFW_FKEY_KP_INSERT: return "KP_INSERT";
     case GLFW_FKEY_KP_DELETE: return "KP_DELETE";
+    case GLFW_FKEY_KP_BEGIN: return "KP_BEGIN";
     case GLFW_FKEY_MEDIA_PLAY: return "MEDIA_PLAY";
     case GLFW_FKEY_MEDIA_PAUSE: return "MEDIA_PAUSE";
     case GLFW_FKEY_MEDIA_PLAY_PAUSE: return "MEDIA_PLAY_PAUSE";
@@ -625,11 +626,13 @@ _glfwGetKeyName(int key)
     case GLFW_FKEY_LEFT_ALT: return "LEFT_ALT";
     case GLFW_FKEY_LEFT_SUPER: return "LEFT_SUPER";
     case GLFW_FKEY_LEFT_HYPER: return "LEFT_HYPER";
+    case GLFW_FKEY_LEFT_META: return "LEFT_META";
     case GLFW_FKEY_RIGHT_SHIFT: return "RIGHT_SHIFT";
     case GLFW_FKEY_RIGHT_CONTROL: return "RIGHT_CONTROL";
     case GLFW_FKEY_RIGHT_ALT: return "RIGHT_ALT";
     case GLFW_FKEY_RIGHT_SUPER: return "RIGHT_SUPER";
     case GLFW_FKEY_RIGHT_HYPER: return "RIGHT_HYPER";
+    case GLFW_FKEY_RIGHT_META: return "RIGHT_META";
     case GLFW_FKEY_ISO_LEVEL3_SHIFT: return "ISO_LEVEL3_SHIFT";
     case GLFW_FKEY_ISO_LEVEL5_SHIFT: return "ISO_LEVEL5_SHIFT";
 /* end functional key names */
@@ -1010,13 +1013,13 @@ GLFWAPI GLFWkeyboardfun glfwSetKeyboardCallback(GLFWwindow* handle, GLFWkeyboard
     return cbfun;
 }
 
-GLFWAPI void glfwUpdateIMEState(GLFWwindow* handle, int which, int a, int b, int c, int d) {
+GLFWAPI void glfwUpdateIMEState(GLFWwindow* handle, const GLFWIMEUpdateEvent *ev) {
     _GLFWwindow* window = (_GLFWwindow*) handle;
     assert(window != NULL);
 
     _GLFW_REQUIRE_INIT();
 #if defined(_GLFW_X11) || defined(_GLFW_WAYLAND) || defined(_GLFW_COCOA)
-    _glfwPlatformUpdateIMEState(window, which, a, b, c, d);
+    _glfwPlatformUpdateIMEState(window, ev);
 #else
     (void)window; (void)which; (void)a; (void)b; (void)c; (void)d;
 #endif

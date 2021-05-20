@@ -185,6 +185,7 @@ static int translateState(int state)
 {
     int mods = 0;
 
+    /* Need some way to expose hyper and meta without xkbcommon-x11 */
     if (state & ShiftMask)
         mods |= GLFW_MOD_SHIFT;
     if (state & ControlMask)
@@ -224,7 +225,8 @@ static void sendEventToWM(_GLFWwindow* window, Atom type,
 
 // Updates the normal hints according to the window settings
 //
-static void updateNormalHints(_GLFWwindow* window, int width, int height)
+static void
+updateNormalHints(_GLFWwindow* window, int width, int height)
 {
     XSizeHints* hints = XAllocSizeHints();
 
@@ -257,7 +259,7 @@ static void updateNormalHints(_GLFWwindow* window, int width, int height)
             }
 
             if (window->widthincr != GLFW_DONT_CARE &&
-                window->heightincr != GLFW_DONT_CARE)
+                window->heightincr != GLFW_DONT_CARE && !window->x11.maximized)
             {
                 hints->flags |= PResizeInc;
                 hints->width_inc = window->widthincr;
@@ -1743,6 +1745,9 @@ static void processEvent(XEvent *event)
                 if (window->x11.maximized != maximized)
                 {
                     window->x11.maximized = maximized;
+                    int width, height;
+                    _glfwPlatformGetWindowSize(window, &width, &height);
+                    updateNormalHints(window, width, height);
                     _glfwInputWindowMaximize(window, maximized);
                 }
             }
@@ -3085,8 +3090,8 @@ VkResult _glfwPlatformCreateWindowSurface(VkInstance instance,
 }
 
 void
-_glfwPlatformUpdateIMEState(_GLFWwindow *w, int which, int a, int b, int c, int d) {
-    glfw_xkb_update_ime_state(w, &_glfw.x11.xkb, which, a, b, c, d);
+_glfwPlatformUpdateIMEState(_GLFWwindow *w, const GLFWIMEUpdateEvent *ev) {
+    glfw_xkb_update_ime_state(w, &_glfw.x11.xkb, ev);
 }
 
 //////////////////////////////////////////////////////////////////////////

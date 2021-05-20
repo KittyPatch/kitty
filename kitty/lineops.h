@@ -83,15 +83,14 @@ size_t cell_as_unicode(CPUCell *cell, bool include_cc, Py_UCS4 *buf, char_type);
 size_t cell_as_unicode_for_fallback(CPUCell *cell, Py_UCS4 *buf);
 size_t cell_as_utf8(CPUCell *cell, bool include_cc, char *buf, char_type);
 size_t cell_as_utf8_for_fallback(CPUCell *cell, char *buf);
-PyObject* unicode_in_range(Line *self, index_type start, index_type limit, bool include_cc, char leading_char);
-PyObject* line_as_unicode(Line *);
+PyObject* unicode_in_range(const Line *self, const index_type start, const index_type limit, const bool include_cc, const char leading_char, const bool skip_zero_cells);
+PyObject* line_as_unicode(Line *, bool);
 
 void linebuf_init_line(LineBuf *, index_type);
 void linebuf_clear(LineBuf *, char_type ch);
 void linebuf_index(LineBuf* self, index_type top, index_type bottom);
 void linebuf_reverse_index(LineBuf *self, index_type top, index_type bottom);
 void linebuf_clear_line(LineBuf *self, index_type y);
-unsigned int linebuf_continued_lines_count(const LineBuf *, const index_type);
 void linebuf_insert_lines(LineBuf *self, unsigned int num, unsigned int y, unsigned int bottom);
 void linebuf_delete_lines(LineBuf *self, index_type num, index_type y, index_type bottom);
 void linebuf_copy_line_to(LineBuf *, Line *, index_type);

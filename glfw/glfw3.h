@@ -428,32 +428,35 @@ typedef enum {
   GLFW_FKEY_KP_END = 0xe050u,
   GLFW_FKEY_KP_INSERT = 0xe051u,
   GLFW_FKEY_KP_DELETE = 0xe052u,
-  GLFW_FKEY_MEDIA_PLAY = 0xe053u,
-  GLFW_FKEY_MEDIA_PAUSE = 0xe054u,
-  GLFW_FKEY_MEDIA_PLAY_PAUSE = 0xe055u,
-  GLFW_FKEY_MEDIA_REVERSE = 0xe056u,
-  GLFW_FKEY_MEDIA_STOP = 0xe057u,
-  GLFW_FKEY_MEDIA_FAST_FORWARD = 0xe058u,
-  GLFW_FKEY_MEDIA_REWIND = 0xe059u,
-  GLFW_FKEY_MEDIA_TRACK_NEXT = 0xe05au,
-  GLFW_FKEY_MEDIA_TRACK_PREVIOUS = 0xe05bu,
-  GLFW_FKEY_MEDIA_RECORD = 0xe05cu,
-  GLFW_FKEY_LOWER_VOLUME = 0xe05du,
-  GLFW_FKEY_RAISE_VOLUME = 0xe05eu,
-  GLFW_FKEY_MUTE_VOLUME = 0xe05fu,
-  GLFW_FKEY_LEFT_SHIFT = 0xe060u,
-  GLFW_FKEY_LEFT_CONTROL = 0xe061u,
-  GLFW_FKEY_LEFT_ALT = 0xe062u,
-  GLFW_FKEY_LEFT_SUPER = 0xe063u,
-  GLFW_FKEY_LEFT_HYPER = 0xe064u,
-  GLFW_FKEY_RIGHT_SHIFT = 0xe065u,
-  GLFW_FKEY_RIGHT_CONTROL = 0xe066u,
-  GLFW_FKEY_RIGHT_ALT = 0xe067u,
-  GLFW_FKEY_RIGHT_SUPER = 0xe068u,
-  GLFW_FKEY_RIGHT_HYPER = 0xe069u,
-  GLFW_FKEY_ISO_LEVEL3_SHIFT = 0xe06au,
-  GLFW_FKEY_ISO_LEVEL5_SHIFT = 0xe06bu,
-  GLFW_FKEY_LAST = 0xe06bu
+  GLFW_FKEY_KP_BEGIN = 0xe053u,
+  GLFW_FKEY_MEDIA_PLAY = 0xe054u,
+  GLFW_FKEY_MEDIA_PAUSE = 0xe055u,
+  GLFW_FKEY_MEDIA_PLAY_PAUSE = 0xe056u,
+  GLFW_FKEY_MEDIA_REVERSE = 0xe057u,
+  GLFW_FKEY_MEDIA_STOP = 0xe058u,
+  GLFW_FKEY_MEDIA_FAST_FORWARD = 0xe059u,
+  GLFW_FKEY_MEDIA_REWIND = 0xe05au,
+  GLFW_FKEY_MEDIA_TRACK_NEXT = 0xe05bu,
+  GLFW_FKEY_MEDIA_TRACK_PREVIOUS = 0xe05cu,
+  GLFW_FKEY_MEDIA_RECORD = 0xe05du,
+  GLFW_FKEY_LOWER_VOLUME = 0xe05eu,
+  GLFW_FKEY_RAISE_VOLUME = 0xe05fu,
+  GLFW_FKEY_MUTE_VOLUME = 0xe060u,
+  GLFW_FKEY_LEFT_SHIFT = 0xe061u,
+  GLFW_FKEY_LEFT_CONTROL = 0xe062u,
+  GLFW_FKEY_LEFT_ALT = 0xe063u,
+  GLFW_FKEY_LEFT_SUPER = 0xe064u,
+  GLFW_FKEY_LEFT_HYPER = 0xe065u,
+  GLFW_FKEY_LEFT_META = 0xe066u,
+  GLFW_FKEY_RIGHT_SHIFT = 0xe067u,
+  GLFW_FKEY_RIGHT_CONTROL = 0xe068u,
+  GLFW_FKEY_RIGHT_ALT = 0xe069u,
+  GLFW_FKEY_RIGHT_SUPER = 0xe06au,
+  GLFW_FKEY_RIGHT_HYPER = 0xe06bu,
+  GLFW_FKEY_RIGHT_META = 0xe06cu,
+  GLFW_FKEY_ISO_LEVEL3_SHIFT = 0xe06du,
+  GLFW_FKEY_ISO_LEVEL5_SHIFT = 0xe06eu,
+  GLFW_FKEY_LAST = 0xe06eu
 } GLFWFunctionKey;
 /* end functional key names */
 
@@ -472,33 +475,44 @@ typedef enum {
  *  If this bit is set one or more Shift keys were held down.
  */
 #define GLFW_MOD_SHIFT           0x0001
-/*! @brief If this bit is set one or more Control keys were held down.
- *
- *  If this bit is set one or more Control keys were held down.
- */
-#define GLFW_MOD_ALT         0x0002
 /*! @brief If this bit is set one or more Alt keys were held down.
  *
  *  If this bit is set one or more Alt keys were held down.
  */
-#define GLFW_MOD_CONTROL             0x0004
+#define GLFW_MOD_ALT             0x0002
+/*! @brief If this bit is set one or more Alt keys were held down.
+ *
+ *  If this bit is set one or more Alt keys were held down.
+ */
+#define GLFW_MOD_CONTROL         0x0004
 /*! @brief If this bit is set one or more Super keys were held down.
  *
  *  If this bit is set one or more Super keys were held down.
  */
 #define GLFW_MOD_SUPER           0x0008
+/*! @brief If this bit is set one or more Hyper keys were held down.
+ *
+ *  If this bit is set one or more Hyper keys were held down.
+ */
+#define GLFW_MOD_HYPER           0x0010
+/*! @brief If this bit is set one or more Meta keys were held down.
+ *
+ *  If this bit is set one or more Meta keys were held down.
+ */
+#define GLFW_MOD_META            0x0020
 /*! @brief If this bit is set the Caps Lock key is enabled.
  *
  *  If this bit is set the Caps Lock key is enabled and the @ref
  *  GLFW_LOCK_KEY_MODS input mode is set.
  */
-#define GLFW_MOD_CAPS_LOCK       0x0010
+#define GLFW_MOD_CAPS_LOCK       0x0040
 /*! @brief If this bit is set the Num Lock key is enabled.
  *
  *  If this bit is set the Num Lock key is enabled and the @ref
  *  GLFW_LOCK_KEY_MODS input mode is set.
  */
-#define GLFW_MOD_NUM_LOCK        0x0020
+#define GLFW_MOD_NUM_LOCK        0x0080
+#define GLFW_LOCK_MASK           (GLFW_MOD_NUM_LOCK | GLFW_MOD_CAPS_LOCK)
 
 /*! @} */
 
@@ -1097,6 +1111,7 @@ typedef enum {
  */
 #define GLFW_ANGLE_PLATFORM_TYPE    0x00050002
 #define GLFW_DEBUG_KEYBOARD         0x00050003
+#define GLFW_DEBUG_RENDERING        0x00050004
 /*! @brief macOS specific init hint.
  *
  *  macOS specific [init hint](@ref GLFW_COCOA_CHDIR_RESOURCES_hint).
@@ -1179,11 +1194,33 @@ typedef struct GLFWwindow GLFWwindow;
  *  @ingroup input
  */
 typedef struct GLFWcursor GLFWcursor;
+
 typedef enum {
     GLFW_RELEASE = 0,
     GLFW_PRESS = 1,
     GLFW_REPEAT = 2
 } GLFWKeyAction;
+
+typedef enum {
+    GLFW_IME_NONE,
+    GLFW_IME_PREEDIT_CHANGED,
+    GLFW_IME_COMMIT_TEXT
+} GLFWIMEState;
+
+typedef enum {
+    GLFW_IME_UPDATE_FOCUS = 1,
+    GLFW_IME_UPDATE_CURSOR_POSITION = 2
+} GLFWIMEUpdateType;
+
+typedef struct GLFWIMEUpdateEvent {
+    GLFWIMEUpdateType type;
+    const char *before_text, *at_text, *after_text;
+    bool focused;
+    struct {
+        int left, top, width, height;
+    } cursor;
+} GLFWIMEUpdateEvent;
+
 
 typedef struct GLFWkeyevent
 {
@@ -1203,9 +1240,9 @@ typedef struct GLFWkeyevent
     const char *text;
 
     // Used for Input Method events. Zero for normal key events.
-    //   A value of 1 means the pre-edit text for the input event has been changed.
-    //   A value of 2 means the text should be committed.
-    int ime_state;
+    //   A value of GLFW_IME_PREEDIT_CHANGED means the pre-edit text for the input event has been changed.
+    //   A value of GLFW_IME_COMMIT_TEXT means the text should be committed.
+    GLFWIMEState ime_state;
 } GLFWkeyevent;
 
 /*! @brief The function pointer type for error callbacks.
@@ -1661,6 +1698,7 @@ typedef void (* GLFWjoystickfun)(int,int);
 
 typedef void (* GLFWuserdatafun)(unsigned long long, void*);
 typedef void (* GLFWtickcallback)(void*);
+typedef bool (* GLFWdrawtextfun)(GLFWwindow *window, const char *text, uint32_t fg, uint32_t bg, uint8_t *output_buf, size_t width, size_t height, float x_offset, float y_offset, size_t right_margin);
 
 /*! @brief Video mode type.
  *
@@ -1817,6 +1855,7 @@ GLFWAPI void glfwStopMainLoop(void);
 GLFWAPI unsigned long long glfwAddTimer(monotonic_t interval, bool repeats, GLFWuserdatafun callback, void * callback_data, GLFWuserdatafun free_callback);
 GLFWAPI void glfwUpdateTimer(unsigned long long timer_id, monotonic_t interval, bool enabled);
 GLFWAPI void glfwRemoveTimer(unsigned long long);
+GLFWAPI GLFWdrawtextfun glfwSetDrawTextFunction(GLFWdrawtextfun function);
 
 /*! @brief Terminates the GLFW library.
  *
@@ -4533,16 +4572,12 @@ GLFWAPI GLFWkeyboardfun glfwSetKeyboardCallback(GLFWwindow* window, GLFWkeyboard
  * Used to notify the IME system of changes in state such as focus gained/lost
  * and text cursor position.
  *
- * @param which: What data to notify. 1 means focus and 2 means cursor position.
- * @param a, b, c, d: Interpreted based on the value of which. When which is 1
- * a is interpreted as a boolean indicating focus gained/lost. When which is 2
- * a, b, c, d are the cursor x, y, width and height values (in the window co-ordinate
- * system).
+ * @param ev: What data to notify.
  *
  *  @ingroup input
  *  @since Added in version 4.0
  */
-GLFWAPI void glfwUpdateIMEState(GLFWwindow* window, int which, int a, int b, int c, int d);
+GLFWAPI void glfwUpdateIMEState(GLFWwindow* window, const GLFWIMEUpdateEvent *ev);
 
 
 /*! @brief Sets the mouse button callback.

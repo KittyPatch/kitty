@@ -318,7 +318,7 @@ parse_osc_8(char *buf, char **id, char **url) {
     if (boundary == NULL) return false;
     *boundary = 0;
     if (*(boundary + 1)) *url = boundary + 1;
-    char *save, *token = strtok_r(buf, ":", &save);
+    char *save = NULL, *token = strtok_r(buf, ":", &save);
     while (token != NULL) {
         size_t len = strlen(token);
         if (len > 3 && token[0] == 'i' && token[1] == 'd' && token[2] == '=' && token[3]) {
@@ -932,7 +932,13 @@ dispatch_csi(Screen *screen, PyObject DUMP_UNUSED *dump_callback) {
             NO_MODIFIERS(end_modifier, ' ', "Select presentation directions escape code not implemented");
             CALL_CSI_HANDLER1(screen_scroll, 1);
         case SD:
-            CALL_CSI_HANDLER1(screen_reverse_scroll, 1);
+            if (!start_modifier && end_modifier == '+') {
+                CALL_CSI_HANDLER1(screen_reverse_scroll_and_fill_from_scrollback, 1);
+            } else {
+                NO_MODIFIERS(start_modifier, 0, "");
+                CALL_CSI_HANDLER1(screen_reverse_scroll, 1);
+            }
+            break;
         case DECSTR:
             if (end_modifier == '$') {
                 // DECRQM
@@ -1127,6 +1133,9 @@ accumulate_oth(Screen *screen, uint32_t ch, PyObject DUMP_UNUSED *dump_callback)
     switch(ch) {
         case ST:
             return true;
+        case DEL:
+        case NUL:
+            break;
         case ESC_ST:
             if (screen->parser_buf_pos > 0 && screen->parser_buf[screen->parser_buf_pos - 1] == ESC) {
                 screen->parser_buf_pos--;

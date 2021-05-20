@@ -32,6 +32,12 @@
 #include <float.h>
 #include <string.h>
 
+#if (MAC_OS_X_VERSION_MAX_ALLOWED < 101300)
+#define NSControlStateValueOn NSOnState
+#define NSControlStateValueOff NSOffState
+#define NSControlStateValueMixed NSMixedState
+#endif
+
 
 static uint32_t
 vk_code_to_functional_key_code(uint8_t key_code) {  // {{{
@@ -454,7 +460,8 @@ static void releaseMonitor(_GLFWwindow* window)
 
 // Translates macOS key modifiers into GLFW ones
 //
-static int translateFlags(NSUInteger flags)
+static int
+translateFlags(NSUInteger flags)
 {
     int mods = 0;
 
@@ -472,7 +479,7 @@ static int translateFlags(NSUInteger flags)
     return mods;
 }
 
-#define debug_key(...) if (_glfw.hints.init.debugKeyboard) NSLog(__VA_ARGS__)
+#define debug_key(...) if (_glfw.hints.init.debugKeyboard) { fprintf(stderr, __VA_ARGS__); fflush(stderr); }
 
 static inline const char*
 format_mods(int mods) {
@@ -560,6 +567,135 @@ translateKeyToModifierFlag(uint32_t key)
 //
 static const NSRange kEmptyRange = { NSNotFound, 0 };
 
+
+// SecureKeyboardEntryController {{{
+@interface SecureKeyboardEntryController : NSObject
+
+@property (nonatomic, readonly) BOOL isDesired;
+@property (nonatomic, readonly, getter=isEnabled) BOOL enabled;
+
++ (instancetype)sharedInstance;
+
+- (void)toggle;
+- (void)update;
+
+@end
+
+@implementation SecureKeyboardEntryController {
+    int _count;
+    BOOL _desired;
+}
+
++ (instancetype)sharedInstance {
+    static id instance;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        instance = [[self alloc] init];
+    });
+    return instance;
+}
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _desired = false;
+
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(applicationDidResignActive:)
+                                                     name:NSApplicationDidResignActiveNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(applicationDidBecomeActive:)
+                                                     name:NSApplicationDidBecomeActiveNotification
+                                                   object:nil];
+        if ([NSApp isActive]) {
+            [self update];
+        }
+    }
+    return self;
+}
+
+#pragma mark - API
+
+- (void)toggle {
+    // Set _desired to the opposite of the current state.
+    _desired = !_desired;
+    debug_key("toggle called. Setting desired to %d", _desired);
+
+    // Try to set the system's state of secure input to the desired state.
+    [self update];
+}
+
+- (BOOL)isEnabled {
+    return !!IsSecureEventInputEnabled();
+}
+
+- (BOOL)isDesired {
+    return _desired;
+}
+
+#pragma mark - Notifications
+
+- (void)applicationDidResignActive:(NSNotification *)notification {
+    (void)notification;
+    if (_count > 0) {
+        debug_key("Application resigning active.");
+        [self update];
+    }
+}
+
+- (void)applicationDidBecomeActive:(NSNotification *)notification {
+    (void)notification;
+    if (self.isDesired) {
+        debug_key("Application became active.");
+        [self update];
+    }
+}
+
+#pragma mark - Private
+
+- (BOOL)allowed {
+    return [NSApp isActive];
+}
+
+- (void)update {
+    debug_key("Update secure keyboard entry. desired=%d active=%d\n",
+         (int)self.isDesired, (int)[NSApp isActive]);
+    const BOOL secure = self.isDesired && [self allowed];
+
+    if (secure && _count > 0) {
+        debug_key("Want to turn on secure input but it's already on\n");
+        return;
+    }
+
+    if (!secure && _count == 0) {
+        debug_key("Want to turn off secure input but it's already off\n");
+        return;
+    }
+
+    debug_key("Before: IsSecureEventInputEnabled returns %d ", (int)self.isEnabled);
+    if (secure) {
+        OSErr err = EnableSecureEventInput();
+        debug_key("EnableSecureEventInput err=%d ", (int)err);
+        if (err) {
+            debug_key("EnableSecureEventInput failed with error %d ", (int)err);
+        } else {
+            _count += 1;
+        }
+    } else {
+        OSErr err = DisableSecureEventInput();
+        debug_key("DisableSecureEventInput err=%d ", (int)err);
+        if (err) {
+            debug_key("DisableSecureEventInput failed with error %d ", (int)err);
+        } else {
+            _count -= 1;
+        }
+    }
+    debug_key("After: IsSecureEventInputEnabled returns %d\n", (int)self.isEnabled);
+}
+
+@end
+// }}}
 
 // Delegate for window related notifications {{{
 
@@ -1071,9 +1207,9 @@ is_ascii_control_char(char x) {
         }
     } else {
         if (input_source_changed) {
-            debug_key(@"Input source changed, clearing pre-edit text and resetting deadkey state\n");
+            debug_key("Input source changed, clearing pre-edit text and resetting deadkey state\n");
             glfw_keyevent.text = NULL;
-            glfw_keyevent.ime_state = 1;
+            glfw_keyevent.ime_state = GLFW_IME_PREEDIT_CHANGED;
             window->ns.deadKeyState = 0;
             _glfwInputKeyboard(window, &glfw_keyevent); // clear pre-edit text
         }
@@ -1093,13 +1229,13 @@ is_ascii_control_char(char x) {
                     &char_count,
                     text
                     ) != noErr) {
-            debug_key(@"UCKeyTranslate failed for keycode: 0x%x (%@) %@\n",
-                    keycode, @(safe_name_for_keycode(keycode)), @(format_mods(mods)));
+            debug_key("UCKeyTranslate failed for keycode: 0x%x (%s) %s\n",
+                    keycode, safe_name_for_keycode(keycode), format_mods(mods));
             window->ns.deadKeyState = 0;
             return;
         }
-        debug_key(@"keycode: 0x%x (%@) %@char_count: %lu deadKeyState: %u repeat: %d",
-                keycode, @(safe_name_for_keycode(keycode)), @(format_mods(mods)), char_count, window->ns.deadKeyState, event.ARepeat);
+        debug_key("\x1b[31mPress:\x1b[m native_key: 0x%x (%s) glfw_key: 0x%x %schar_count: %lu deadKeyState: %u repeat: %d ",
+                keycode, safe_name_for_keycode(keycode), key, format_mods(mods), char_count, window->ns.deadKeyState, event.ARepeat);
         if (process_text) {
             // this will call insertText which will fill up _glfw.ns.text
             [self interpretKeyEvents:[NSArray arrayWithObject:event]];
@@ -1108,30 +1244,30 @@ is_ascii_control_char(char x) {
         }
         if (window->ns.deadKeyState && (char_count == 0 || keycode == 0x75)) {
             // 0x75 is the delete key which needs to be ignored during a compose sequence
-            debug_key(@"Sending pre-edit text for dead key (text: %@ markedText: %@).\n", @(format_text(_glfw.ns.text)), markedText);
             glfw_keyevent.text = [[markedText string] UTF8String];
-            glfw_keyevent.ime_state = 1;
+            debug_key("Sending pre-edit text for dead key (text: %s markedText: %s).\n", format_text(_glfw.ns.text), glfw_keyevent.text);
+            glfw_keyevent.ime_state = GLFW_IME_PREEDIT_CHANGED;
             _glfwInputKeyboard(window, &glfw_keyevent); // update pre-edit text
             return;
         }
         if (in_compose_sequence) {
-            debug_key(@"Clearing pre-edit text at end of compose sequence\n");
+            debug_key("Clearing pre-edit text at end of compose sequence\n");
             glfw_keyevent.text = NULL;
-            glfw_keyevent.ime_state = 1;
+            glfw_keyevent.ime_state = GLFW_IME_PREEDIT_CHANGED;
             _glfwInputKeyboard(window, &glfw_keyevent); // clear pre-edit text
         }
     }
     if (is_ascii_control_char(_glfw.ns.text[0])) _glfw.ns.text[0] = 0;  // don't send text for ascii control codes
-    debug_key(@"text: %@ glfw_key: %@ marked_text: %@\n",
-            @(format_text(_glfw.ns.text)), @(_glfwGetKeyName(key)), markedText);
+    debug_key("text: %s glfw_key: %s marked_text: %s\n",
+            format_text(_glfw.ns.text), _glfwGetKeyName(key), [[markedText string] UTF8String]);
     if (!window->ns.deadKeyState) {
         if ([self hasMarkedText]) {
             glfw_keyevent.text = [[markedText string] UTF8String];
-            glfw_keyevent.ime_state = 1;
+            glfw_keyevent.ime_state = GLFW_IME_PREEDIT_CHANGED;
             _glfwInputKeyboard(window, &glfw_keyevent); // update pre-edit text
         } else if (previous_has_marked_text) {
             glfw_keyevent.text = NULL;
-            glfw_keyevent.ime_state = 1;
+            glfw_keyevent.ime_state = GLFW_IME_PREEDIT_CHANGED;
             _glfwInputKeyboard(window, &glfw_keyevent); // clear pre-edit text
         }
         if (([self hasMarkedText] || previous_has_marked_text) && !_glfw.ns.text[0]) {
@@ -1140,7 +1276,7 @@ is_ascii_control_char(char x) {
         }
     }
     glfw_keyevent.text = _glfw.ns.text;
-    glfw_keyevent.ime_state = 0;
+    glfw_keyevent.ime_state = GLFW_IME_NONE;
     add_alternate_keys(&glfw_keyevent, event);
     _glfwInputKeyboard(window, &glfw_keyevent);
 }
@@ -1181,6 +1317,8 @@ is_ascii_control_char(char x) {
 
     GLFWkeyevent glfw_keyevent = {.key = key, .native_key = keycode, .action = GLFW_RELEASE, .mods = mods};
     add_alternate_keys(&glfw_keyevent, event);
+    debug_key("\x1b[32mRelease:\x1b[m native_key: 0x%x (%s) glfw_key: 0x%x %s\n",
+            keycode, safe_name_for_keycode(keycode), key, format_mods(mods));
     _glfwInputKeyboard(window, &glfw_keyevent);
 }
 
@@ -1295,11 +1433,11 @@ is_ascii_control_char(char x) {
     [[markedText mutableString] setString:@""];
 }
 
-void _glfwPlatformUpdateIMEState(_GLFWwindow *w, int which, int a, int b, int c, int d) {
-    [w->ns.view updateIMEStateFor: which left:(CGFloat)a top:(CGFloat)b cellWidth:(CGFloat)c cellHeight:(CGFloat)d];
+void _glfwPlatformUpdateIMEState(_GLFWwindow *w, const GLFWIMEUpdateEvent *ev) {
+    [w->ns.view updateIMEStateFor: ev->type left:(CGFloat)ev->cursor.left top:(CGFloat)ev->cursor.top cellWidth:(CGFloat)ev->cursor.width cellHeight:(CGFloat)ev->cursor.height];
 }
 
-- (void)updateIMEStateFor:(int)which
+- (void)updateIMEStateFor:(GLFWIMEUpdateType)which
                      left:(CGFloat)left
                       top:(CGFloat)top
                 cellWidth:(CGFloat)cellWidth
@@ -1310,7 +1448,7 @@ void _glfwPlatformUpdateIMEState(_GLFWwindow *w, int which, int a, int b, int c,
     top /= window->ns.yscale;
     cellWidth /= window->ns.xscale;
     cellHeight /= window->ns.yscale;
-    debug_key(@"updateIMEState: %f, %f, %f, %f\n", left, top, cellWidth, cellHeight);
+    debug_key("updateIMEState: %f, %f, %f, %f\n", left, top, cellWidth, cellHeight);
     const NSRect frame = [window->ns.view frame];
     const NSRect rectInView = NSMakeRect(left,
                                          frame.size.height - top - cellHeight,
@@ -1401,6 +1539,19 @@ void _glfwPlatformUpdateIMEState(_GLFWwindow *w, int which, int a, int b, int c,
 
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
     if (item.action == @selector(performMiniaturize:)) return YES;
+    if (item.action == @selector(toggleSecureInput:)) {
+      SecureKeyboardEntryController *controller = [SecureKeyboardEntryController sharedInstance];
+      if (controller.isEnabled) {
+          if (controller.isDesired) {
+              item.state = NSControlStateValueOn;
+          } else {
+              item.state = NSControlStateValueMixed;
+          }
+      } else {
+          item.state = controller.isDesired ? NSControlStateValueOn : NSControlStateValueOff;
+      }
+      return YES;
+    }
     return [super validateMenuItem:item];
 }
 
@@ -1408,6 +1559,11 @@ void _glfwPlatformUpdateIMEState(_GLFWwindow *w, int which, int a, int b, int c,
 {
     if (glfw_window && (!glfw_window->decorated || glfw_window->ns.titlebar_hidden)) [self miniaturize:self];
     else [super performMiniaturize:sender];
+}
+
+- (void)toggleSecureInput:(id)sender {
+    (void)sender;
+    [[SecureKeyboardEntryController sharedInstance] toggle];
 }
 
 - (BOOL)canBecomeKeyWindow

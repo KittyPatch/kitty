@@ -101,6 +101,7 @@ GLFW_FKEY_KP_HOME: int
 GLFW_FKEY_KP_END: int
 GLFW_FKEY_KP_INSERT: int
 GLFW_FKEY_KP_DELETE: int
+GLFW_FKEY_KP_BEGIN: int
 GLFW_FKEY_MEDIA_PLAY: int
 GLFW_FKEY_MEDIA_PAUSE: int
 GLFW_FKEY_MEDIA_PLAY_PAUSE: int
@@ -119,11 +120,13 @@ GLFW_FKEY_LEFT_CONTROL: int
 GLFW_FKEY_LEFT_ALT: int
 GLFW_FKEY_LEFT_SUPER: int
 GLFW_FKEY_LEFT_HYPER: int
+GLFW_FKEY_LEFT_META: int
 GLFW_FKEY_RIGHT_SHIFT: int
 GLFW_FKEY_RIGHT_CONTROL: int
 GLFW_FKEY_RIGHT_ALT: int
 GLFW_FKEY_RIGHT_SUPER: int
 GLFW_FKEY_RIGHT_HYPER: int
+GLFW_FKEY_RIGHT_META: int
 GLFW_FKEY_ISO_LEVEL3_SHIFT: int
 GLFW_FKEY_ISO_LEVEL5_SHIFT: int
 # end glfw functional keys
@@ -131,6 +134,10 @@ GLFW_MOD_SHIFT: int
 GLFW_MOD_CONTROL: int
 GLFW_MOD_ALT: int
 GLFW_MOD_SUPER: int
+GLFW_MOD_HYPER: int
+GLFW_MOD_META: int
+GLFW_MOD_CAPS_LOCK: int
+GLFW_MOD_NUM_LOCK: int
 GLFW_MOD_KITTY: int
 GLFW_MOUSE_BUTTON_1: int
 GLFW_MOUSE_BUTTON_2: int
@@ -431,7 +438,7 @@ def init_cell_program() -> None:
     pass
 
 
-def set_titlebar_color(os_window_id: int, color: int) -> bool:
+def set_titlebar_color(os_window_id: int, color: int, use_system_color: bool = False) -> bool:
     pass
 
 
@@ -543,7 +550,7 @@ def glfw_terminate() -> None:
     pass
 
 
-def glfw_init(path: str, debug_keyboard: bool = False) -> bool:
+def glfw_init(path: str, debug_keyboard: bool = False, debug_rendering: bool = False) -> bool:
     pass
 
 

@@ -2,16 +2,13 @@
 # vim:fileencoding=utf-8
 # License: GPL v3 Copyright: 2018, Kovid Goyal <kovid at kovidgoyal.net>
 
-import sys
-from typing import List
-
 from kitty.key_encoding import (
-    ALT, CTRL, PRESS, RELEASE, REPEAT, SHIFT, SUPER, KeyEvent,
-    encode_key_event
+    ALT, CAPS_LOCK, CTRL, HYPER, META, NUM_LOCK, PRESS, RELEASE, REPEAT, SHIFT,
+    SUPER, KeyEvent, encode_key_event
 )
 
-from ..tui.handler import Handler
-from ..tui.loop import Loop
+from kittens.tui.handler import Handler
+from kittens.tui.loop import Loop
 
 
 class KeysHandler(Handler):
@@ -32,7 +29,12 @@ class KeysHandler(Handler):
                 SHIFT: 'Shift',
                 ALT: 'Alt',
                 CTRL: 'Ctrl',
-                SUPER: 'Super'}.items():
+                SUPER: 'Super',
+                HYPER: 'Hyper',
+                META: 'Meta',
+                NUM_LOCK: 'NumLock',
+                CAPS_LOCK: 'CapsLock',
+        }.items():
             if key_event.mods & m:
                 lmods.append(name)
         mods = '+'.join(lmods)
@@ -64,12 +66,8 @@ class KeysHandler(Handler):
         self.quit_loop(0)
 
 
-def main(args: List[str]) -> None:
+def main() -> None:
     loop = Loop()
     handler = KeysHandler()
     loop.loop(handler)
     raise SystemExit(loop.return_code)
-
-
-if __name__ == '__main__':
-    main(sys.argv)

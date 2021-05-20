@@ -165,12 +165,13 @@ def downsample(src: BufType, dest: BufType, dest_width: int, dest_height: int, f
             dest[offset + x] = min(255, dest[offset + x] + average_intensity_in_src(x, y))
 
 
+class SSByteArray(bytearray):
+    supersample_factor = 1
+
+
 def supersampled(supersample_factor: int = 4) -> Callable:
     # Anti-alias the drawing performed by the wrapped function by
     # using supersampling
-
-    class SSByteArray(bytearray):
-        supersample_factor = 1
 
     def create_wrapper(f: Callable) -> Callable:
         @wraps(f)
@@ -203,7 +204,7 @@ def line_equation(x1: int, y1: int, x2: int, y2: int) -> Callable[[int], float]:
 
 
 @supersampled()
-def triangle(buf: BufType, width: int, height: int, left: bool = True) -> None:
+def triangle(buf: SSByteArray, width: int, height: int, left: bool = True) -> None:
     ay1, by1, y2 = 0, height - 1, height // 2
     if left:
         x1, x2 = 0, width - 1
@@ -216,7 +217,7 @@ def triangle(buf: BufType, width: int, height: int, left: bool = True) -> None:
 
 
 @supersampled()
-def corner_triangle(buf: BufType, width: int, height: int, corner: str) -> None:
+def corner_triangle(buf: SSByteArray, width: int, height: int, corner: str) -> None:
     if corner == 'top-right' or corner == 'bottom-left':
         diagonal_y = line_equation(0, 0, width - 1, height - 1)
         if corner == 'top-right':
@@ -233,7 +234,7 @@ def corner_triangle(buf: BufType, width: int, height: int, corner: str) -> None:
 
 
 @supersampled()
-def half_triangle(buf: BufType, width: int, height: int, which: str = 'left', inverted: bool = False) -> None:
+def half_triangle(buf: SSByteArray, width: int, height: int, which: str = 'left', inverted: bool = False) -> None:
     mid_x, mid_y = width // 2, height // 2
     if which == 'left':
         upper_y = line_equation(0, 0, mid_x, mid_y)
@@ -274,19 +275,17 @@ def thick_line(buf: BufType, width: int, height: int, thickness_in_pixels: int, 
 
 
 @supersampled()
-def cross_line(buf: BufType, width: int, height: int, left: bool = True, level: int = 1) -> None:
+def cross_line(buf: SSByteArray, width: int, height: int, left: bool = True, level: int = 1) -> None:
     if left:
         p1, p2 = (0, 0), (width - 1, height - 1)
     else:
         p1, p2 = (width - 1, 0), (0, height - 1)
-    supersample_factor = getattr(buf, 'supersample_factor')
-    thick_line(buf, width, height, supersample_factor * thickness(level), p1, p2)
+    thick_line(buf, width, height, buf.supersample_factor * thickness(level), p1, p2)
 
 
 @supersampled()
-def half_cross_line(buf: BufType, width: int, height: int, which: str = 'tl', level: int = 1) -> None:
-    supersample_factor = getattr(buf, 'supersample_factor')
-    thickness_in_pixels = thickness(level) * supersample_factor
+def half_cross_line(buf: SSByteArray, width: int, height: int, which: str = 'tl', level: int = 1) -> None:
+    thickness_in_pixels = thickness(level) * buf.supersample_factor
     my = (height - 1) // 2
     if which == 'tl':
         p1 = 0, 0
@@ -304,9 +303,8 @@ def half_cross_line(buf: BufType, width: int, height: int, which: str = 'tl', le
 
 
 @supersampled()
-def mid_lines(buf: BufType, width: int, height: int, level: int = 1, pts: Iterable[str] = ('lt',)) -> None:
+def mid_lines(buf: SSByteArray, width: int, height: int, level: int = 1, pts: Iterable[str] = ('lt',)) -> None:
     mid_x, mid_y = width // 2, height // 2
-    supersample_factor = getattr(buf, 'supersample_factor')
 
     def pt_to_coords(p: str) -> Tuple[int, int]:
         if p == 'l':
@@ -320,7 +318,7 @@ def mid_lines(buf: BufType, width: int, height: int, level: int = 1, pts: Iterab
 
     for x in pts:
         p1, p2 = map(pt_to_coords, x)
-        thick_line(buf, width, height, supersample_factor * thickness(level), p1, p2)
+        thick_line(buf, width, height, buf.supersample_factor * thickness(level), p1, p2)
 
 
 ParameterizedFunc = Callable[[float], float]
@@ -391,7 +389,7 @@ def get_bezier_limits(bezier_x: ParameterizedFunc, bezier_y: ParameterizedFunc) 
 
 
 @supersampled()
-def D(buf: BufType, width: int, height: int, left: bool = True) -> None:
+def D(buf: SSByteArray, width: int, height: int, left: bool = True) -> None:
     c1x = find_bezier_for_D(width, height)
     start = (0, 0)
     end = (0, height - 1)
@@ -412,10 +410,10 @@ def D(buf: BufType, width: int, height: int, left: bool = True) -> None:
 
 
 def draw_parametrized_curve(
-    buf: BufType, width: int, height: int, level: int,
+    buf: SSByteArray, width: int, height: int, level: int,
     xfunc: ParameterizedFunc, yfunc: ParameterizedFunc
 ) -> None:
-    supersample_factor = getattr(buf, 'supersample_factor')
+    supersample_factor = buf.supersample_factor
     num_samples = height * 8
     delta, extra = divmod(thickness(level), 2)
     delta *= supersample_factor
@@ -464,7 +462,8 @@ def rectircle_equations(
     xexp = radius / cell_width
     pow = math.pow
     left_quadrants, lower_quadrants = {'╭': (True, False), '╮': (False, False), '╰': (True, True), '╯': (False, True)}[which]
-    adjust_left_quadrant = (cell_width // supersample_factor % 2) * supersample_factor
+    cell_width_is_odd = (cell_width // supersample_factor) % 2
+    adjust_x = cell_width_is_odd * supersample_factor
 
     if lower_quadrants:
         def y(t: float) -> float:  # 0 -> top of cell, 1 -> middle of cell
@@ -478,20 +477,41 @@ def rectircle_equations(
     if left_quadrants:
         def x(t: float) -> float:
             xterm = 1 - pow(t, yexp)
-            return cell_width - abs(a * pow(xterm, xexp)) - adjust_left_quadrant
+            return math.floor(cell_width - abs(a * pow(xterm, xexp)) - adjust_x)
     else:
         def x(t: float) -> float:
             xterm = 1 - pow(t, yexp)
-            return abs(a * pow(xterm, xexp))
+            return math.ceil(abs(a * pow(xterm, xexp)))
 
     return x, y
 
 
 @supersampled()
-def rounded_corner(buf: BufType, width: int, height: int, level: int = 1, which: str = '╭') -> None:
-    supersample_factor = getattr(buf, 'supersample_factor')
-    xfunc, yfunc = rectircle_equations(width, height, supersample_factor, which)
+def rounded_corner(buf: SSByteArray, width: int, height: int, level: int = 1, which: str = '╭') -> None:
+    xfunc, yfunc = rectircle_equations(width, height, buf.supersample_factor, which)
     draw_parametrized_curve(buf, width, height, level, xfunc, yfunc)
+
+
+@supersampled()
+def rounded_separator(buf: SSByteArray, width: int, height: int, level: int = 1, left: bool = True) -> None:
+    gap = thickness(level) * buf.supersample_factor
+    c1x = find_bezier_for_D(width - gap, height)
+    start = (0, 0)
+    end = (0, height - 1)
+    c1 = c1x, start[1]
+    c2 = c1x, end[1]
+    bezier_x, bezier_y = cubic_bezier(start, end, c1, c2)
+    if left:
+        draw_parametrized_curve(buf, width, height, level, bezier_x, bezier_y)
+    else:
+        mbuf = SSByteArray(width * height)
+        mbuf.supersample_factor = buf.supersample_factor
+        draw_parametrized_curve(mbuf, width, height, level, bezier_x, bezier_y)
+        for y in range(height):
+            offset = y * width
+            for src_x in range(width):
+                dest_x = width - 1 - src_x
+                buf[offset + dest_x] = mbuf[offset + src_x]
 
 
 def half_dhline(buf: BufType, width: int, height: int, level: int = 1, which: str = 'left', only: Optional[str] = None) -> Tuple[int, int]:
@@ -677,7 +697,7 @@ def sextant(buf: BufType, width: int, height: int, level: int = 1, which: int = 
 
 @supersampled()
 def smooth_mosaic(
-    buf: BufType, width: int, height: int, level: int = 1,
+    buf: SSByteArray, width: int, height: int, level: int = 1,
     lower: bool = True, a: Tuple[float, float] = (0, 0), b: Tuple[float, float] = (0, 0)
 ) -> None:
     ax, ay = int(a[0] * (width - 1)), int(a[1] * (height - 1))
@@ -791,15 +811,21 @@ box_chars: Dict[str, List[Callable]] = {
     '╾': [p(half_hline, level=3), p(half_hline, which='right')],
     '╿': [p(half_vline, level=3), p(half_vline, which='bottom')],
     '': [triangle],
-    '': [p(triangle, left=False)],
-    '': [D],
-    '': [p(D, left=False)],
     '': [p(half_cross_line, which='tl'), p(half_cross_line, which='bl')],
+    '': [p(triangle, left=False)],
     '': [p(half_cross_line, which='tr'), p(half_cross_line, which='br')],
+    '': [D],
+    '': [rounded_separator],
+    '': [p(D, left=False)],
+    '': [p(rounded_separator, left=False)],
     '': [p(corner_triangle, corner='bottom-left')],
+    '': [cross_line],
     '': [p(corner_triangle, corner='bottom-right')],
+    '': [p(cross_line, left=False)],
     '': [p(corner_triangle, corner='top-left')],
+    '': [p(cross_line, left=False)],
     '': [p(corner_triangle, corner='top-right')],
+    '': [cross_line],
     '═': [dhline],
     '║': [dvline],
 
@@ -1036,7 +1062,7 @@ def test_char(ch: str, sz: int = 48) -> None:
             set_send_sprite_to_gpu(None)
 
 
-def test_drawing(sz: int = 48, family: str = 'monospace') -> None:
+def test_drawing(sz: int = 48, family: str = 'monospace', start: int = 0x2500, num_rows: int = 10, num_cols: int = 16) -> None:
     from .render import display_bitmap, setup_for_testing
     from kitty.fast_data_types import concat_cells, set_send_sprite_to_gpu
 
@@ -1054,14 +1080,14 @@ def test_drawing(sz: int = 48, family: str = 'monospace') -> None:
                 return cell
             return space
 
-        pos = 0x2500
+        pos = start
         rows = []
         space_row = join_cells(repeat(space, 32))
 
         try:
-            for r in range(10):
+            for r in range(num_rows):
                 row = []
-                for i in range(16):
+                for i in range(num_cols):
                     row.append(render_chr(chr(pos)))
                     row.append(space)
                     pos += 1

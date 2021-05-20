@@ -82,6 +82,22 @@ new(PyTypeObject *type, PyObject UNUSED *args, PyObject UNUSED *kwds) {
 }
 
 static int
+open_cache_file_without_tmpfile(const char *cache_path) {
+    int fd = -1;
+    static const char *template = "%s/disk-cache-XXXXXXXXXXXX";
+    const size_t sz = strlen(cache_path) + sizeof(template) + 4;
+    FREE_AFTER_FUNCTION char *buf = calloc(1, sz);
+    if (!buf) { errno = ENOMEM; return -1; }
+    snprintf(buf, sz - 1, template, cache_path);
+    while (fd < 0) {
+        fd = mkostemp(buf, O_CLOEXEC);
+        if (fd > -1 || errno != EINTR) break;
+    }
+    if (fd > -1) unlink(buf);
+    return fd;
+}
+
+static int
 open_cache_file(const char *cache_path) {
     int fd = -1;
 #ifdef O_TMPFILE
@@ -89,16 +105,9 @@ open_cache_file(const char *cache_path) {
         fd = safe_open(cache_path, O_TMPFILE | O_CLOEXEC | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
         if (fd > -1 || errno != EINTR) break;
     }
+    if (fd == -1) fd = open_cache_file_without_tmpfile(cache_path);
 #else
-    size_t sz = strlen(cache_path) + 16;
-    FREE_AFTER_FUNCTION char *buf = calloc(1, sz);
-    if (!buf) { errno = ENOMEM; return -1; }
-    snprintf(buf, sz - 1, "%s/disk-cache-XXXXXXXXXXXX", cache_path);
-    while (fd < 0) {
-        fd = mkostemp(buf, O_CLOEXEC);
-        if (fd > -1 || errno != EINTR) break;
-    }
-    if (fd > -1) unlink(buf);
+    fd = open_cache_file_without_tmpfile(cache_path);
 #endif
     return fd;
 }
@@ -459,6 +468,7 @@ dealloc(DiskCache* self) {
         self->cache_file_fd = -1;
     }
     if (self->currently_writing.data) free(self->currently_writing.data);
+    free(self->cache_dir); self->cache_dir = NULL;
     Py_TYPE(self)->tp_free((PyObject*)self);
 }
 

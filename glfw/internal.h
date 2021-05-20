@@ -276,6 +276,7 @@ struct _GLFWinitconfig
     bool          hatButtons;
     int           angleType;
     bool          debugKeyboard;
+    bool          debugRendering;
     struct {
         bool      menubar;
         bool      chdir;
@@ -614,6 +615,7 @@ struct _GLFWlibrary
         GLFWmonitorfun  monitor;
         GLFWjoystickfun joystick;
         GLFWapplicationclosefun application_close;
+        GLFWdrawtextfun draw_text;
     } callbacks;
 
 
@@ -728,7 +730,8 @@ void _glfwPlatformSetWindowDecorated(_GLFWwindow* window, bool enabled);
 void _glfwPlatformSetWindowFloating(_GLFWwindow* window, bool enabled);
 void _glfwPlatformSetWindowMousePassthrough(_GLFWwindow* window, bool enabled);
 void _glfwPlatformSetWindowOpacity(_GLFWwindow* window, float opacity);
-void _glfwPlatformUpdateIMEState(_GLFWwindow *w, int which, int a, int b, int c, int d);
+void _glfwPlatformUpdateIMEState(_GLFWwindow *w, const GLFWIMEUpdateEvent *ev);
+void _glfwPlatformChangeCursorTheme(void);
 
 void _glfwPlatformPollEvents(void);
 void _glfwPlatformWaitEvents(void);

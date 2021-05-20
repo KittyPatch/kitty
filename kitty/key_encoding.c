@@ -8,12 +8,12 @@
 #include "keys.h"
 #include "charsets.h"
 
-typedef enum { SHIFT=1, ALT=2, CTRL=4, SUPER=8 } ModifierMasks;
+typedef enum { SHIFT=1, ALT=2, CTRL=4, SUPER=8, HYPER=16, META=32, CAPS_LOCK=64, NUM_LOCK=128} ModifierMasks;
 typedef enum { PRESS = 0, REPEAT = 1, RELEASE = 2} KeyAction;
 typedef struct {
     uint32_t key, shifted_key, alternate_key;
     struct {
-        bool shift, alt, ctrl, super;
+        bool shift, alt, ctrl, super, hyper, meta, numlock, capslock;
         unsigned value;
         char encoded[4];
     } mods;
@@ -47,12 +47,18 @@ is_modifier_key(const uint32_t key) {
 }
 
 static inline void
-convert_glfw_mods(int mods, KeyEvent *ev) {
-    ev->mods.alt = (mods & GLFW_MOD_ALT) > 0, ev->mods.ctrl = (mods & GLFW_MOD_CONTROL) > 0, ev->mods.shift = (mods & GLFW_MOD_SHIFT) > 0, ev->mods.super = (mods & GLFW_MOD_SUPER) > 0;
+convert_glfw_mods(int mods, KeyEvent *ev, const unsigned key_encoding_flags) {
+    if (!key_encoding_flags) mods &= ~GLFW_LOCK_MASK;
+    ev->mods.alt = (mods & GLFW_MOD_ALT) > 0, ev->mods.ctrl = (mods & GLFW_MOD_CONTROL) > 0, ev->mods.shift = (mods & GLFW_MOD_SHIFT) > 0, ev->mods.super = (mods & GLFW_MOD_SUPER) > 0, ev->mods.hyper = (mods & GLFW_MOD_HYPER) > 0, ev->mods.meta = (mods & GLFW_MOD_META) > 0;
+    ev->mods.numlock = (mods & GLFW_MOD_NUM_LOCK) > 0, ev->mods.capslock = (mods & GLFW_MOD_CAPS_LOCK) > 0;
     ev->mods.value = ev->mods.shift ? SHIFT : 0;
     if (ev->mods.alt) ev->mods.value |= ALT;
     if (ev->mods.ctrl) ev->mods.value |= CTRL;
     if (ev->mods.super) ev->mods.value |= SUPER;
+    if (ev->mods.hyper) ev->mods.value |= HYPER;
+    if (ev->mods.meta) ev->mods.value |= META;
+    if (ev->mods.capslock) ev->mods.value |= CAPS_LOCK;
+    if (ev->mods.numlock) ev->mods.value |= NUM_LOCK;
     snprintf(ev->mods.encoded, sizeof(ev->mods.encoded), "%u", ev->mods.value + 1);
 }
 
@@ -60,7 +66,7 @@ convert_glfw_mods(int mods, KeyEvent *ev) {
 static inline void
 init_encoding_data(EncodingData *ans, const KeyEvent *ev) {
     ans->add_actions = ev->report_all_event_types && ev->action != PRESS;
-    ans->has_mods = ev->mods.encoded[0] && ev->mods.encoded[0] != '1';
+    ans->has_mods = ev->mods.encoded[0] && ( ev->mods.encoded[0] != '1' || ev->mods.encoded[1] );
     ans->add_alternates = ev->report_alternate_key && ((ev->shifted_key > 0 && ev->mods.shift) || ev->alternate_key > 0);
     if (ans->add_alternates) { if (ev->mods.shift) ans->shifted_key = ev->shifted_key; ans->alternate_key = ev->alternate_key; }
     ans->action = ev->action;
@@ -90,7 +96,7 @@ serialize(const EncodingData *data, char *output, const char csi_trailer) {
     }
     if (third_field_not_empty) {
         const char *p = data->text;
-        uint32_t codep, state = UTF8_ACCEPT;
+        uint32_t codep; UTF8State state = UTF8_ACCEPT;
         bool first = true;
         while(*p) {
             if (decode_utf8(&state, &codep, *p) == UTF8_ACCEPT) {
@@ -167,6 +173,7 @@ encode_function_key(const KeyEvent *ev, char *output) {
             case GLFW_FKEY_DOWN: SIMPLE("\x1bOB");
             case GLFW_FKEY_RIGHT: SIMPLE("\x1bOC");
             case GLFW_FKEY_LEFT: SIMPLE("\x1bOD");
+            case GLFW_FKEY_KP_BEGIN: SIMPLE("\x1bOE");
             case GLFW_FKEY_END: SIMPLE("\x1bOF");
             case GLFW_FKEY_HOME: SIMPLE("\x1bOH");
             case GLFW_FKEY_F1: SIMPLE("\x1bOP");
@@ -220,6 +227,7 @@ encode_function_key(const KeyEvent *ev, char *output) {
         case GLFW_FKEY_F10: S(21, '~');
         case GLFW_FKEY_F11: S(23, '~');
         case GLFW_FKEY_F12: S(24, '~');
+        case GLFW_FKEY_KP_BEGIN: S(1, 'E');
 /* end special numbers */
         default: break;
     }
@@ -289,10 +297,10 @@ ctrled_key(const char key) { // {{{
 
 static int
 encode_printable_ascii_key_legacy(const KeyEvent *ev, char *output) {
-    if (!ev->mods.value) return snprintf(output, KEY_BUFFER_SIZE, "%c", (char)ev->key);
+    unsigned mods = ev->mods.value;
+    if (!mods) return snprintf(output, KEY_BUFFER_SIZE, "%c", (char)ev->key);
 
     char key = ev->key;
-    unsigned mods = ev->mods.value;
     if (mods & SHIFT) {
         const char shifted = ev->shifted_key;
         if (shifted && shifted != key && (!(mods & CTRL) || key < 'a' || key > 'z')) {
@@ -380,7 +388,8 @@ encode_key(const KeyEvent *ev, char *output) {
                 int ret = encode_printable_ascii_key_legacy(ev, output);
                 if (ret > 0) return ret;
             }
-            if ((ev->mods.value == CTRL || ev->mods.value == ALT || ev->mods.value == (CTRL | ALT)) && ev->alternate_key && !is_legacy_ascii_key(ev->key) && is_legacy_ascii_key(ev->alternate_key)) {
+            unsigned mods = ev->mods.value;
+            if ((mods == CTRL || mods == ALT || mods == (CTRL | ALT)) && ev->alternate_key && !is_legacy_ascii_key(ev->key) && is_legacy_ascii_key(ev->alternate_key)) {
                 KeyEvent alternate = *ev;
                 alternate.key = ev->alternate_key;
                 alternate.alternate_key = 0;
@@ -397,7 +406,7 @@ encode_key(const KeyEvent *ev, char *output) {
 static inline bool
 startswith_ascii_control_char(const char *p) {
     if (!p || !*p) return true;
-    uint32_t codep, state = UTF8_ACCEPT;
+    uint32_t codep; UTF8State state = UTF8_ACCEPT;
     while(*p) {
         if (decode_utf8(&state, &codep, *p) == UTF8_ACCEPT) {
             return codep < 32 || codep == 127;
@@ -424,7 +433,7 @@ encode_glfw_key_event(const GLFWkeyevent *e, const bool cursor_key_mode, const u
     ev.has_text = e->text && !startswith_ascii_control_char(e->text);
     if (!ev.key && !ev.has_text) return 0;
     bool send_text_standalone = !ev.report_text;
-    if (!ev.disambiguate && GLFW_FKEY_KP_0 <= ev.key && ev.key <= GLFW_FKEY_KP_DELETE) {
+    if (!ev.disambiguate && GLFW_FKEY_KP_0 <= ev.key && ev.key <= GLFW_FKEY_KP_BEGIN) {
         ev.key = convert_kp_key_to_normal_key(ev.key);
     }
     switch (e->action) {
@@ -433,6 +442,6 @@ encode_glfw_key_event(const GLFWkeyevent *e, const bool cursor_key_mode, const u
         case GLFW_RELEASE: ev.action = RELEASE; break;
     }
     if (send_text_standalone && ev.has_text && (ev.action == PRESS || ev.action == REPEAT)) return SEND_TEXT_TO_CHILD;
-    convert_glfw_mods(e->mods, &ev);
+    convert_glfw_mods(e->mods, &ev, key_encoding_flags);
     return encode_key(&ev, output);
 }

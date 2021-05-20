@@ -184,6 +184,9 @@ class TestParser(BaseTest):
         pb('\033[3 @', ('Shift left escape code not implemented',))
         pb('\033[3 A', ('Shift right escape code not implemented',))
         pb('\033[3;4 S', ('Select presentation directions escape code not implemented',))
+        pb('\033[1T', ('screen_reverse_scroll', 1))
+        pb('\033[T', ('screen_reverse_scroll', 1))
+        pb('\033[+T', ('screen_reverse_scroll_and_fill_from_scrollback', 1))
 
     def test_csi_code_rep(self):
         s = self.create_screen(8)
@@ -381,7 +384,7 @@ class TestParser(BaseTest):
                     k[p] = v.encode('ascii')
             for f in 'action delete_action transmission_type compressed'.split():
                 k.setdefault(f, b'\0')
-            for f in ('format more id data_sz data_offset width height x_offset y_offset data_height data_width'
+            for f in ('format more id data_sz data_offset width height x_offset y_offset data_height data_width cursor_movement'
                       ' num_cells num_lines cell_x_offset cell_y_offset z_index placement_id image_number quiet').split():
                 k.setdefault(f, 0)
             p = k.pop('payload', '').encode('utf-8')

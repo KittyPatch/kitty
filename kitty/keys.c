@@ -85,7 +85,31 @@ update_ime_position(OSWindow *os_window, Window* w, Screen *screen) {
     unsigned int left = w->geometry.left, top = w->geometry.top;
     left += screen->cursor->x * cell_width;
     top += screen->cursor->y * cell_height;
-    glfwUpdateIMEState(global_state.callback_os_window->handle, 2, left, top, cell_width, cell_height);
+    GLFWIMEUpdateEvent ev = { .type = GLFW_IME_UPDATE_CURSOR_POSITION };
+    ev.cursor.left = left; ev.cursor.top = top; ev.cursor.width = cell_width; ev.cursor.height = cell_height;
+    glfwUpdateIMEState(global_state.callback_os_window->handle, &ev);
+}
+
+static inline const char*
+format_mods(unsigned mods) {
+    static char buf[128];
+    char *p = buf, *s;
+#define pr(x) p += snprintf(p, sizeof(buf) - (p - buf) - 1, x)
+    pr("mods: ");
+    s = p;
+    if (mods & GLFW_MOD_CONTROL) pr("ctrl+");
+    if (mods & GLFW_MOD_ALT) pr("alt+");
+    if (mods & GLFW_MOD_SHIFT) pr("shift+");
+    if (mods & GLFW_MOD_SUPER) pr("super+");
+    if (mods & GLFW_MOD_HYPER) pr("hyper+");
+    if (mods & GLFW_MOD_META) pr("meta+");
+    if (mods & GLFW_MOD_CAPS_LOCK) pr("capslock+");
+    if (mods & GLFW_MOD_NUM_LOCK) pr("numlock+");
+    if (p == s) pr("none");
+    else p--;
+    pr(" ");
+#undef pr
+    return buf;
 }
 
 void
@@ -95,29 +119,29 @@ on_key_input(GLFWkeyevent *ev) {
     const uint32_t key = ev->key, native_key = ev->native_key;
     const char *text = ev->text ? ev->text : "";
 
-    debug("on_key_input: glfw key: %d native_code: 0x%x action: %s mods: 0x%x text: '%s' state: %d ",
+    debug("\x1b[33mon_key_input\x1b[m: glfw key: 0x%x native_code: 0x%x action: %s %stext: '%s' state: %d ",
             key, native_key,
             (action == GLFW_RELEASE ? "RELEASE" : (action == GLFW_PRESS ? "PRESS" : "REPEAT")),
-            mods, text, ev->ime_state);
+            format_mods(mods), text, ev->ime_state);
     if (!w) { debug("no active window, ignoring\n"); return; }
     if (OPT(mouse_hide_wait) < 0 && !is_modifier_key(key)) hide_mouse(global_state.callback_os_window);
     Screen *screen = w->render_data.screen;
     id_type active_window_id = w->id;
 
     switch(ev->ime_state) {
-        case 1:  // update pre-edit text
+        case GLFW_IME_PREEDIT_CHANGED:
             update_ime_position(global_state.callback_os_window, w, screen);
             screen_draw_overlay_text(screen, text);
             debug("updated pre-edit text: '%s'\n", text);
             return;
-        case 2:  // commit text
+        case GLFW_IME_COMMIT_TEXT:
             if (*text) {
                 schedule_write_to_child(w->id, 1, text, strlen(text));
                 debug("committed pre-edit text: %s\n", text);
             } else debug("committed pre-edit text: (null)\n");
             screen_draw_overlay_text(screen, NULL);
             return;
-        case 0:
+        case GLFW_IME_NONE:
             // for macOS, update ime position on every key input
             // because the position is required before next input
 #if defined(__APPLE__)
@@ -165,7 +189,7 @@ on_key_input(GLFWkeyevent *ev) {
         if (!w) return;
     } else if (w->last_special_key_pressed == key) {
         w->last_special_key_pressed = 0;
-        debug("ignoring release event for previous press that was handled as shortcut");
+        debug("ignoring release event for previous press that was handled as shortcut\n");
         return;
     }
 #undef create_key_event
@@ -185,7 +209,7 @@ on_key_input(GLFWkeyevent *ev) {
         schedule_write_to_child(w->id, 1, encoded_key, size);
         debug("sent key to child\n");
     } else {
-        debug("ignoring as keyboard mode does not allow %s events\n", action == GLFW_RELEASE ? "release" : "repeat");
+        debug("ignoring as keyboard mode does not support encoding this event\n");
     }
 }
 

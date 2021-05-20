@@ -12,6 +12,7 @@
 #undef _DARWIN_C_SOURCE
 #endif
 #include "data-types.h"
+#include "cleanup.h"
 #include "safe-wrappers.h"
 #include "control-codes.h"
 #include "wcwidth-std.h"
@@ -216,6 +217,7 @@ extern bool init_cocoa(PyObject *module);
 extern bool init_macos_process_info(PyObject *module);
 #else
 extern bool init_freetype_library(PyObject*);
+extern bool init_freetype_render_ui_text(PyObject*);
 #endif
 
 
@@ -225,6 +227,10 @@ PyInit_fast_data_types(void) {
 
     m = PyModule_Create(&module);
     if (m == NULL) return NULL;
+    if (Py_AtExit(run_at_exit_cleanup_functions) != 0) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to register the atexit cleanup handler");
+        return NULL;
+    }
     init_monotonic();
 
     if (!init_logging(m)) return NULL;
@@ -253,6 +259,7 @@ PyInit_fast_data_types(void) {
     if (!init_freetype_library(m)) return NULL;
     if (!init_fontconfig_library(m)) return NULL;
     if (!init_desktop(m)) return NULL;
+    if (!init_freetype_render_ui_text(m)) return NULL;
 #endif
     if (!init_fonts(m)) return NULL;
 

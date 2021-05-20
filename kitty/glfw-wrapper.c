@@ -33,6 +33,9 @@ load_glfw(const char* path) {
     *(void **) (&glfwRemoveTimer_impl) = dlsym(handle, "glfwRemoveTimer");
     if (glfwRemoveTimer_impl == NULL) fail("Failed to load glfw function glfwRemoveTimer with error: %s", dlerror());
 
+    *(void **) (&glfwSetDrawTextFunction_impl) = dlsym(handle, "glfwSetDrawTextFunction");
+    if (glfwSetDrawTextFunction_impl == NULL) fail("Failed to load glfw function glfwSetDrawTextFunction with error: %s", dlerror());
+
     *(void **) (&glfwTerminate_impl) = dlsym(handle, "glfwTerminate");
     if (glfwTerminate_impl == NULL) fail("Failed to load glfw function glfwTerminate with error: %s", dlerror());
 
@@ -428,6 +431,9 @@ load_glfw(const char* path) {
 
     *(void **) (&glfwRequestWaylandFrameEvent_impl) = dlsym(handle, "glfwRequestWaylandFrameEvent");
     if (glfwRequestWaylandFrameEvent_impl == NULL) dlerror(); // clear error indicator
+
+    *(void **) (&glfwWaylandSetTitlebarColor_impl) = dlsym(handle, "glfwWaylandSetTitlebarColor");
+    if (glfwWaylandSetTitlebarColor_impl == NULL) dlerror(); // clear error indicator
 
     *(void **) (&glfwDBusUserNotify_impl) = dlsym(handle, "glfwDBusUserNotify");
     if (glfwDBusUserNotify_impl == NULL) dlerror(); // clear error indicator

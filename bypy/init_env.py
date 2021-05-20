@@ -46,9 +46,12 @@ def run(*args, **extra_env):
     return subprocess.call(list(args), env=env, cwd=cwd)
 
 
+SETUP_CMD = [PYTHON, 'setup.py', '--build-universal-binary']
+
+
 def build_frozen_launcher(extra_include_dirs):
     inc_dirs = [f'--extra-include-dirs={x}' for x in extra_include_dirs]
-    cmd = [PYTHON, 'setup.py', '--prefix', build_frozen_launcher.prefix] + inc_dirs + ['build-frozen-launcher']
+    cmd = SETUP_CMD + ['--prefix', build_frozen_launcher.prefix] + inc_dirs + ['build-frozen-launcher']
     if run(*cmd, cwd=build_frozen_launcher.writeable_src_dir) != 0:
         print('Building of frozen kitty launcher failed', file=sys.stderr)
         os.chdir(KITTY_DIR)
@@ -64,7 +67,9 @@ def run_tests(kitty_exe):
             'KITTY_CACHE_DIRECTORY': os.path.join(tdir, 'cache')
         }
         [os.mkdir(x) for x in env.values()]
-        if subprocess.call([kitty_exe, '+runpy', 'from kitty_tests.main import run_tests; run_tests()'], env=env) != 0:
+        cmd = [kitty_exe, '+runpy', 'from kitty_tests.main import run_tests; run_tests()']
+        print(*map(shlex.quote, cmd), flush=True)
+        if subprocess.call(cmd, env=env) != 0:
             print('Checking of kitty build failed', file=sys.stderr)
             os.chdir(os.path.dirname(kitty_exe))
             run_shell()
@@ -87,7 +92,9 @@ def build_c_extensions(ext_dir, args):
     with suppress(FileNotFoundError):
         os.unlink(os.path.join(writeable_src_dir, 'kitty', 'launcher', 'kitty'))
 
-    cmd = [PYTHON, 'setup.py', 'macos-freeze' if ismacos else 'linux-freeze']
+    cmd = SETUP_CMD + ['macos-freeze' if ismacos else 'linux-freeze']
+    if args.dont_strip:
+        cmd.append('--debug')
     dest = kitty_constants['appname'] + ('.app' if ismacos else '')
     dest = build_frozen_launcher.prefix = os.path.join(ext_dir, dest)
     cmd += ['--prefix', dest, '--full']

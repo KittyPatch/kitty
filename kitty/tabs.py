@@ -38,6 +38,7 @@ class TabDict(TypedDict):
     is_focused: bool
     title: str
     layout: str
+    layout_state: Dict[str, Any]
     windows: List[WindowDict]
     active_window_history: List[int]
 
@@ -491,9 +492,9 @@ class Tab:  # {{{
     def move_window_backward(self) -> None:
         self.move_window(-1)
 
-    def list_windows(self, active_window: Optional[Window]) -> Generator[WindowDict, None, None]:
+    def list_windows(self, active_window: Optional[Window], self_window: Optional[Window] = None) -> Generator[WindowDict, None, None]:
         for w in self:
-            yield w.as_dict(is_focused=w is active_window)
+            yield w.as_dict(is_focused=w is active_window, is_self=w is self_window)
 
     def matches(self, field: str, pat: Pattern) -> bool:
         if field == 'id':
@@ -664,14 +665,15 @@ class TabManager:  # {{{
     def __len__(self) -> int:
         return len(self.tabs)
 
-    def list_tabs(self, active_tab: Optional[Tab], active_window: Optional[Window]) -> Generator[TabDict, None, None]:
+    def list_tabs(self, active_tab: Optional[Tab], active_window: Optional[Window], self_window: Optional[Window] = None) -> Generator[TabDict, None, None]:
         for tab in self:
             yield {
                 'id': tab.id,
                 'is_focused': tab is active_tab,
                 'title': tab.name or tab.title,
                 'layout': str(tab.current_layout.name),
-                'windows': list(tab.list_windows(active_window)),
+                'layout_state': tab.current_layout.layout_state(),
+                'windows': list(tab.list_windows(active_window, self_window)),
                 'active_window_history': list(tab.windows.active_window_history),
             }
 
@@ -685,7 +687,10 @@ class TabManager:  # {{{
 
     @property
     def active_tab(self) -> Optional[Tab]:
-        return self.tabs[self.active_tab_idx] if self.tabs else None
+        try:
+            return self.tabs[self.active_tab_idx] if self.tabs else None
+        except Exception:
+            return None
 
     @property
     def active_window(self) -> Optional[Window]:
@@ -748,11 +753,10 @@ class TabManager:  # {{{
         return self.tabs[idx]
 
     def remove(self, tab: Tab) -> None:
+        active_tab_before_removal = self.active_tab
         self._remove_tab(tab)
-        try:
-            active_tab_needs_to_change = self.active_tab is None or self.active_tab is tab
-        except IndexError:
-            active_tab_needs_to_change = True
+        active_tab = self.active_tab
+        active_tab_needs_to_change = (active_tab is None and (active_tab_before_removal is None or active_tab_before_removal is tab)) or active_tab is tab
         while True:
             try:
                 self.active_tab_history.remove(tab.id)
@@ -777,6 +781,13 @@ class TabManager:  # {{{
                 next_active_tab = max(0, min(self.active_tab_idx, len(self.tabs) - 1))
 
             self._set_active_tab(next_active_tab)
+        elif active_tab_before_removal is not None:
+            try:
+                idx = self.tabs.index(active_tab_before_removal)
+            except Exception:
+                pass
+            else:
+                self._active_tab_idx = idx
         self.mark_tab_bar_dirty()
         tab.destroy()
 
